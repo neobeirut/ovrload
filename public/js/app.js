@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load products
   async function loadProducts() {
     try {
-      const res = await fetch('/api/products');
+      const res = await fetch('api/products');
       if (res.ok) {
         products = await res.json();
         

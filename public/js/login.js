@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const passcode = loginPasscode.value;
 
     try {
-      const res = await fetch('/api/auth', {
+      const res = await fetch('api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ passcode })
@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (res.ok) {
         // Auth success: redirect to admin page
-        window.location.href = '/admin';
+        window.location.href = 'admin';
       } else {
         const data = await res.json();
         loginError.textContent = data.error || 'Invalid passcode';

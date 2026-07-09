@@ -33,14 +33,14 @@ document.addEventListener('DOMContentLoaded', () => {
   logoutBtn.addEventListener('click', () => {
     // Clear cookies client-side
     document.cookie = 'admin_passcode=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    window.location.href = '/login';
+    window.location.href = 'login';
   });
 
   // Fetch and Load Inventory
   async function loadInventory() {
     inventoryTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: var(--text-secondary);">Loading inventory...</td></tr>`;
     try {
-      const res = await fetch('/api/products');
+      const res = await fetch('api/products');
       if (res.ok) {
         products = await res.json();
         renderInventory();
@@ -177,7 +177,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const payload = { name, category, unit_price_usd: priceVal, image_url: imageUrl, sort_order: sortOrder, description };
 
     try {
-      const url = editingProductId ? `/api/products/${editingProductId}` : '/api/products';
+      const url = editingProductId ? `api/products/${editingProductId}` : 'api/products';
       const method = editingProductId ? 'PUT' : 'POST';
 
       const res = await fetch(url, {
@@ -200,12 +200,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+
+
   // Delete product logic
   async function handleDelete(id, name) {
     if (!confirm(`Are you sure you want to delete "${name}"?`)) return;
 
     try {
-      const res = await fetch(`/api/products/${id}`, {
+      const res = await fetch(`api/products/${id}`, {
         method: 'DELETE'
       });
 
@@ -247,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadCategoriesSortList() {
     categoriesSortList.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 1.5rem 0;">Loading categories...</p>';
     try {
-      const res = await fetch('/api/categories');
+      const res = await fetch('api/categories');
       const categoryOrders = await res.json();
       const orderMap = {};
       categoryOrders.forEach(c => {
@@ -300,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
     buttonEl.textContent = '...';
     buttonEl.disabled = true;
     try {
-      const res = await fetch('/api/categories', {
+      const res = await fetch('api/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, sort_order })
