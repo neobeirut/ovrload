@@ -95,6 +95,9 @@ function requireAuth(req, res, next) {
 // GET /api/products
 app.get('/api/products', async (req, res) => {
   try {
+    if (!process.env.DATABASE_URL) {
+      return res.status(500).json({ error: 'DATABASE_URL environment variable is not defined.' });
+    }
     const result = await pool.query(
       `SELECT 
         p.id, 
@@ -112,7 +115,7 @@ app.get('/api/products', async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching products:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    res.status(500).json({ error: 'Database Connection Error: ' + error.message });
   }
 });
 
