@@ -139,39 +139,29 @@ button {
   margin-bottom: 1.5rem;
 }
 
-.search-box {
-  position: relative;
-  margin-bottom: 1rem;
-}
-
-.search-input {
-  width: 100%;
-  padding: 0.875rem 1rem 0.875rem 2.75rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--surface-border);
+.discount-banner {
+  background: rgba(230, 110, 25, 0.08);
+  border: 1px solid rgba(230, 110, 25, 0.25);
   border-radius: var(--border-radius);
+  padding: 0.875rem 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 600;
   color: var(--text-primary);
-  font-family: inherit;
-  font-size: 0.95rem;
-  font-weight: 500;
-  transition: all var(--transition-fast);
+  margin-bottom: 1.25rem;
+  line-height: 1.4;
+  animation: scaleUp 0.3s var(--transition-normal);
 }
 
-.search-input:focus {
-  outline: none;
-  border-color: var(--primary);
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 0 0 3px rgba(230, 110, 25, 0.15);
+.whatsapp-link {
+  color: #25d366; /* WhatsApp bright green */
+  font-weight: 800;
+  text-decoration: underline;
+  transition: color var(--transition-fast) ease;
 }
 
-.search-icon {
-  position: absolute;
-  left: 1rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-secondary);
-  pointer-events: none;
-  display: flex;
+.whatsapp-link:hover {
+  color: #20ba5a;
 }
 
 .category-scroller {

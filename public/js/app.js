@@ -5,7 +5,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const productList = document.getElementById('product-list');
   const categoryScroller = document.getElementById('category-scroller');
-  const searchInput = document.getElementById('search-input');
   const detailOverlay = document.getElementById('detail-overlay');
   const drawerTitle = document.getElementById('drawer-title');
   const drawerPrice = document.getElementById('drawer-price');
@@ -107,10 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Search logic
-  searchInput.addEventListener('input', (e) => {
-    searchQuery = e.target.value;
-    renderProducts();
-  });
+
 
   // Drawer modal management
   function openDrawer(product) {
