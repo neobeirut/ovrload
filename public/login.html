@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ovrload | Admin Login</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+  <!-- Authentication Login View -->
+  <div class="auth-wrapper" style="background-color: #0a0a0a; min-height: 100vh; display: flex; align-items: center; justify-content: center;">
+    <div class="auth-card glass">
+      <h1 style="font-size: 1.75rem; font-weight: 800; margin-bottom: 0.5rem; letter-spacing: -0.5px; text-align: center;">
+        <span style="color: var(--primary);">OVR</span>LOAD
+      </h1>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 2rem; text-align: center;">Enter admin passcode to unlock dashboard</p>
+      
+      <form id="login-form" class="auth-form">
+        <div class="form-group">
+          <label class="form-label">Passcode</label>
+          <input type="password" id="login-passcode" placeholder="••••••••" class="form-input" required>
+        </div>
+        <p id="login-error" class="error-message" style="display: none; text-align: center;"></p>
+        <button type="submit" class="submit-btn" style="margin-top: 0.5rem; width: 100%;">Unlock Dashboard</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/login.js?v=2"></script>
+</body>
+</html>
