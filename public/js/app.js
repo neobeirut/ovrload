@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   let products = [];
-  let selectedCategory = 'OVRLOAD Meals';
+  let selectedCategory = 'All';
   let searchQuery = '';
 
   const productList = document.getElementById('product-list');
