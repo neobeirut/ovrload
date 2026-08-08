@@ -103,14 +103,30 @@ app.get('/api/products', async (req, res) => {
         p.id, 
         p.name, 
         p.description, 
-        p.category, 
-        p.unit_price_usd::float as unit_price_usd, 
+        c.name as category, 
+        p.price::float as unit_price_usd, 
         p.image_url, 
         p.sort_order, 
-        p.created_at 
-       FROM ovrload_products p
-       LEFT JOIN ovrload_categories c ON LOWER(p.category) = LOWER(c.name)
-       ORDER BY COALESCE(c.sort_order, 9999) ASC, p.category ASC, p.sort_order ASC, p.name ASC`
+        p.created_at,
+        COALESCE(
+          (SELECT json_agg(json_build_object(
+            'id', pc.id,
+            'name', pc.ingredient,
+            'customization_type', pc.customization_type,
+            'price', pc.price::float,
+            'option_group_name', ci.option_group_name,
+            'is_required', ci.is_required,
+            'is_multi_select', ci.is_multi_select
+          ))
+           FROM product_customizations pc
+           LEFT JOIN customization_items ci ON pc.customization_item_id = ci.id
+           WHERE pc.product_id = p.id AND pc.is_active = true
+          ), '[]'::json
+        ) as customizations
+       FROM products p
+       LEFT JOIN categories c ON p.category_id = c.id
+       WHERE p.status = 'Available'
+       ORDER BY COALESCE(c.display_order, 9999) ASC, c.name ASC, p.sort_order ASC, p.name ASC`
     );
     res.json(result.rows);
   } catch (error) {
@@ -205,7 +221,7 @@ app.delete('/api/products/:id', requireAuth, async (req, res) => {
 app.get('/api/categories', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT name, sort_order FROM ovrload_categories ORDER BY sort_order ASC, name ASC'
+      'SELECT name, display_order as sort_order FROM categories WHERE is_active = true ORDER BY display_order ASC, name ASC'
     );
     res.json(result.rows);
   } catch (error) {
@@ -270,6 +286,228 @@ app.get('/api/auth', (req, res) => {
   }
 
   res.status(401).json({ authenticated: false });
+});
+
+// GET /api/branches
+app.get('/api/branches', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, name, phone, location, delivery_start_time, delivery_end_time FROM branches WHERE is_active = true ORDER BY name ASC'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching branches:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /api/order-settings
+app.get('/api/order-settings', async (req, res) => {
+  try {
+    const deliveryResult = await pool.query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'delivery_cost' LIMIT 1"
+    );
+    const discountResult = await pool.query(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'whatsapp_discount_percentage' LIMIT 1"
+    );
+
+    const deliveryCost = deliveryResult.rows.length > 0 ? parseFloat(deliveryResult.rows[0].setting_value) : 3.0;
+    const discountPercent = discountResult.rows.length > 0 ? parseFloat(discountResult.rows[0].setting_value) : 15.0;
+
+    res.json({
+      deliveryCost,
+      discountPercent
+    });
+  } catch (error) {
+    console.error('Error fetching order settings:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Helper to calculate Haversine distance in km
+function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// POST /api/calculate-delivery
+app.post('/api/calculate-delivery', async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    }
+
+    // Get branch 1 location
+    const branchRes = await pool.query(
+      'SELECT location FROM branches WHERE id = 1 LIMIT 1'
+    );
+
+    let branchLat = 33.876503; // Default Badaro coordinates
+    let branchLng = 35.517279;
+
+    if (branchRes.rows.length > 0 && branchRes.rows[0].location) {
+      const coords = branchRes.rows[0].location.match(/(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
+      if (coords) {
+        branchLat = parseFloat(coords[1]);
+        branchLng = parseFloat(coords[2]);
+      }
+    }
+
+    // Calculate distance
+    const distanceKm = haversineDistanceKm(lat, lng, branchLat, branchLng);
+
+    // Find active pricing rule
+    const ruleRes = await pool.query(
+      `SELECT id, delivery_cost, min_distance_km, max_distance_km 
+       FROM delivery_pricing_rules 
+       WHERE is_active = true 
+         AND (branch_id = 1 OR branch_id IS NULL)
+         AND min_distance_km <= $1 
+         AND max_distance_km >= $1
+       ORDER BY branch_id NULLS LAST, display_order ASC, id ASC
+       LIMIT 1`,
+      [distanceKm]
+    );
+
+    if (ruleRes.rows.length > 0) {
+      const rule = ruleRes.rows[0];
+      return res.json({
+        fee: parseFloat(rule.delivery_cost),
+        distanceKm: parseFloat(distanceKm.toFixed(2)),
+        inDeliveryZone: true
+      });
+    }
+
+    // Check if out of delivery zone (distance is greater than max active rule distance)
+    const maxRes = await pool.query(
+      `SELECT MAX(max_distance_km) as max_distance 
+       FROM delivery_pricing_rules 
+       WHERE is_active = true 
+         AND (branch_id = 1 OR branch_id IS NULL)`
+    );
+
+    const maxDistance = maxRes.rows[0].max_distance ? parseFloat(maxRes.rows[0].max_distance) : 0;
+
+    if (maxDistance > 0 && distanceKm > maxDistance) {
+      return res.json({
+        fee: 0,
+        distanceKm: parseFloat(distanceKm.toFixed(2)),
+        inDeliveryZone: false,
+        error: `Address is outside our delivery zone (maximum distance is ${maxDistance} km)`
+      });
+    }
+
+    // Default fallback fee on no matched rule
+    return res.json({
+      fee: 5.0,
+      distanceKm: parseFloat(distanceKm.toFixed(2)),
+      inDeliveryZone: true
+    });
+
+  } catch (error) {
+    console.error('Error calculating delivery fee:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/orders/save — Save a WhatsApp order to the database
+app.post('/api/orders/save', async (req, res) => {
+  const {
+    customerName,
+    customerPhone,
+    deliveryAddress,
+    deliveryTime,
+    items,          // Array of { id, name, qty, unit_price_usd, customizations }
+    subtotal,
+    discountAmount,
+    deliveryFee,
+    total,
+    lat,
+    lng
+  } = req.body;
+
+  if (!items || items.length === 0) {
+    return res.status(400).json({ error: 'No items in order.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Compose special_instructions with delivery time info
+    const specialInstructions = `Delivery Time: ${deliveryTime || 'ASAP'}`;
+
+    // Insert order with dedicated customer name & phone columns
+    const orderResult = await client.query(
+      `INSERT INTO orders
+        (branch_id, order_type, delivery_address, subtotal_amount, delivery_fee, discount_amount,
+         total_amount, status, special_instructions, delivery_distance_km, delivery_cost_at_order,
+         customer_name, customer_phone, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+       RETURNING id`,
+      [
+        1,                           // branch_id (Ovrload single branch)
+        'delivery',                  // order_type
+        deliveryAddress || '',       // delivery_address
+        subtotal || 0,               // subtotal_amount
+        deliveryFee || 0,            // delivery_fee
+        discountAmount || 0,         // discount_amount
+        total || 0,                  // total_amount
+        'pending',                   // status
+        specialInstructions,         // special_instructions
+        lat && lng ? String(haversineDistanceKm(33.876503, 35.517279, lat, lng).toFixed(2)) : null,
+        deliveryFee || 0,            // delivery_cost_at_order
+        customerName || null,        // customer_name
+        customerPhone || null        // customer_phone
+      ]
+    );
+
+    const orderId = orderResult.rows[0].id;
+
+    // Insert order items
+    for (const item of items) {
+      const itemTotal = (item.unit_price_usd || 0) * (item.qty || 1);
+      const customizationsText = item.customizations && item.customizations.length > 0
+        ? item.customizations.map(c => c.type === 'remove' ? `No ${c.name}` : c.name).join(', ')
+        : null;
+
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price, customizations)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          orderId,
+          item.id,
+          item.qty || 1,
+          item.unit_price_usd || 0,
+          itemTotal,
+          customizationsText
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, orderId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error saving order:', error);
+    res.status(500).json({ error: 'Failed to save order.' });
+  } finally {
+    client.release();
+  }
 });
 
 // Handle wildcard routing for frontend pages
