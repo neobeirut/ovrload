@@ -36,15 +36,6 @@ const pool = new Pool({
   }
 });
 
-app.get('/api/debug-db', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT COUNT(*) FROM products');
-    res.json({ count: r.rows[0].count, dbUrlHost: SUPABASE_DB_URL.split('@')[1] });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 
 
 app.use(express.json());
