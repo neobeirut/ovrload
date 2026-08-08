@@ -28,15 +28,20 @@ const PORT = process.env.PORT || 3000;
 
 const SUPABASE_DB_URL = "postgresql://postgres.nigtjaiwnmjdnmjtdlof:FsDdHJhoYDv1GsxW@aws-1-ap-south-1.pooler.supabase.com:6543/postgres";
 
-// Setup connection pool - enforce Supabase database URL for Ovrload
-const activeDbUrl = (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase')) 
-  ? process.env.DATABASE_URL 
-  : SUPABASE_DB_URL;
-
+// Setup connection pool - always force Ovrload Supabase database URL
 const pool = new Pool({
-  connectionString: activeDbUrl,
+  connectionString: SUPABASE_DB_URL,
   ssl: {
     rejectUnauthorized: false
+  }
+});
+
+app.get('/api/debug-db', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT COUNT(*) FROM products');
+    res.json({ count: r.rows[0].count, dbUrlHost: SUPABASE_DB_URL.split('@')[1] });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
