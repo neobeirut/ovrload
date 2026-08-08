@@ -26,9 +26,15 @@ if (fs.existsSync(envPath)) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Setup connection pool
+const SUPABASE_DB_URL = "postgresql://postgres.nigtjaiwnmjdnmjtdlof:FsDdHJhoYDv1GsxW@aws-1-ap-south-1.pooler.supabase.com:6543/postgres";
+
+// Setup connection pool - enforce Supabase database URL for Ovrload
+const activeDbUrl = (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase')) 
+  ? process.env.DATABASE_URL 
+  : SUPABASE_DB_URL;
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: activeDbUrl,
   ssl: {
     rejectUnauthorized: false
   }
