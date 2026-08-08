@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let searchQuery = '';
   
   // Shopping Cart & Order settings state
+  let cart = JSON.parse(localStorage.getItem('ovrload_cart')) || [];
   let orderType = 'pickup';
   let deliveryCost = 0.00;
   let discountPercent = 15.00;
