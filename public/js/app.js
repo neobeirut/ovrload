@@ -873,9 +873,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (orderType === 'delivery' && !orderLocation.value.trim()) {
-      alert("Please enter your delivery address.");
-      return;
+    if (orderType === 'delivery') {
+      if (!userCoords || !orderLocation.value.includes('[Maps Pin:')) {
+        alert("Please click 'Pin GPS Location' to share your exact location on Google Maps. A pinned GPS location is required for delivery.");
+        return;
+      }
     }
 
     if (orderTimeType.value === 'scheduled' && orderTime.value) {
