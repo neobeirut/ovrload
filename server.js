@@ -456,28 +456,28 @@ async function sendInfobipOrderNotifications({
     .replace(/\s+/g, " ")
     .trim();
 
-  const cleanCustomerInfo = `${customerName || "Customer"} (${customerPhone || "N/A"})`
+  const cleanCustomer = `${customerName || "Customer"} (${customerPhone || "N/A"})`
     .replace(/[\r\n]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  // 1. TEMPLATE NOTIFICATION FOR OVR LOAD (new_order_to_branch)
+  const locLinkStr = (lat && lng) ? ` (GPS: maps.google.com/?q=${lat},${lng})` : "";
+
+  // 1. OVR LOAD MERCHANT NOTIFICATION (sent to 96181202607)
+  const ovrloadSummary = `OVR LOAD | Cust: ${cleanCustomer} | Addr: ${cleanAddress}${locLinkStr} | Items: ${itemsTextClean} | Total: $${Number(total || 0).toFixed(2)}`;
+
   const ovrloadPayload = {
     messages: [
       {
         from: sender,
         to: "96181202607",
         content: {
-          templateName: "new_order_to_branch",
+          templateName: "order_confirmation",
           templateData: {
             body: {
               placeholders: [
                 String(orderId),
-                "OVR LOAD",
-                itemsTextClean || "Items listed",
-                `$${Number(total || 0).toFixed(2)}`,
-                cleanCustomerInfo,
-                cleanAddress
+                ovrloadSummary
               ]
             }
           },
@@ -498,17 +498,19 @@ async function sendInfobipOrderNotifications({
       body: JSON.stringify(ovrloadPayload)
     });
     const ovrData = await resOvr.json().catch(() => ({}));
-    console.log(`[infobip_template_dispatch] Sent template "new_order_to_branch" to OVR LOAD (96181202607): status=${resOvr.status}`, JSON.stringify(ovrData));
+    console.log(`[infobip_template_dispatch] Sent merchant notification to OVR LOAD (96181202607): status=${resOvr.status}`, JSON.stringify(ovrData));
   } catch (err) {
-    console.error("[infobip_template_dispatch] Error sending template to OVR LOAD:", err);
+    console.error("[infobip_template_dispatch] Error sending merchant notification:", err);
   }
 
-  // 2. CLIENT ORDER CONFIRMATION TEMPLATE (order_confirmation)
+  // 2. CLIENT ORDER CONFIRMATION (sent to customerPhone)
   if (customerPhone) {
     let clientTo = String(customerPhone).replace(/\D/g, "");
     if (clientTo.startsWith("00")) clientTo = clientTo.slice(2);
     if (clientTo.startsWith("0") && clientTo.length === 8) clientTo = `961${clientTo.slice(1)}`;
     if (!clientTo.startsWith("961") && clientTo.length >= 7 && clientTo.length <= 8) clientTo = `961${clientTo}`;
+
+    const clientSummary = `OVR LOAD | Items: ${itemsTextClean} | Total: $${Number(total || 0).toFixed(2)}`;
 
     const clientPayload = {
       messages: [
@@ -521,7 +523,7 @@ async function sendInfobipOrderNotifications({
               body: {
                 placeholders: [
                   String(orderId),
-                  "OVR LOAD"
+                  clientSummary
                 ]
               }
             },
@@ -542,9 +544,9 @@ async function sendInfobipOrderNotifications({
         body: JSON.stringify(clientPayload)
       });
       const cliData = await resCli.json().catch(() => ({}));
-      console.log(`[infobip_template_dispatch] Sent template "order_confirmation" to Client (${clientTo}): status=${resCli.status}`, JSON.stringify(cliData));
+      console.log(`[infobip_template_dispatch] Sent client confirmation to Client (${clientTo}): status=${resCli.status}`, JSON.stringify(cliData));
     } catch (err) {
-      console.error("[infobip_template_dispatch] Error sending template to Client:", err);
+      console.error("[infobip_template_dispatch] Error sending client confirmation:", err);
     }
   }
 }
