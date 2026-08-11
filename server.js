@@ -426,7 +426,7 @@ app.post('/api/calculate-delivery', async (req, res) => {
   }
 });
 
-// Helper function to send automated WhatsApp notifications via Infobip API
+// Helper function to send automated WhatsApp notifications via Infobip Template API
 async function sendInfobipOrderNotifications({
   orderId,
   customerName,
@@ -441,7 +441,7 @@ async function sendInfobipOrderNotifications({
   lng,
   orderType
 }) {
-  console.log(`[infobip_dispatch] START for Order #${orderId}`);
+  console.log(`[infobip_template_dispatch] START for Order #${orderId}`);
   const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96176489078").replace("+", "").trim();
@@ -452,56 +452,92 @@ async function sendInfobipOrderNotifications({
 
   const locLink = (lat && lng) ? `\n📍 GPS Location: https://maps.google.com/?q=${lat},${lng}` : "";
 
-  // 1. FULL ORDER NOTIFICATION FOR OVR LOAD (Sent to 96181202607)
-  const ovrloadMsg = `🛒 *New Order #${orderId}*\n\n*Order Type:* ${String(orderType || "delivery").toUpperCase()}\n\n*Items:*\n${itemsText}\n\n*Subtotal:* $${Number(subtotal || 0).toFixed(2)}\n*Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\n*Total:* $${Number(total || 0).toFixed(2)}\n\n*Customer Name:* ${customerName || "N/A"}\n*Customer Phone:* ${customerPhone || "N/A"}\n*Delivery Address:* ${deliveryAddress || "Not specified"}${locLink}\n*Requested Time:* ${deliveryTime || "ASAP"}`;
+  // 1. TEMPLATE NOTIFICATION FOR OVR LOAD (new_order_to_branch)
+  const ovrloadPayload = {
+    messages: [
+      {
+        from: sender,
+        to: "96181202607",
+        content: {
+          templateName: "new_order_to_branch",
+          templateData: {
+            body: {
+              placeholders: [
+                String(orderId),
+                "OVR LOAD",
+                itemsText || "No items listed",
+                `$${Number(total || 0).toFixed(2)}`,
+                `${customerName || "N/A"} (${customerPhone || "N/A"})`,
+                deliveryAddress || "Pickup / Not specified"
+              ]
+            }
+          },
+          language: "en"
+        }
+      }
+    ]
+  };
 
   try {
-    const resOvr = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+    const resOvr = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
       method: "POST",
       headers: {
         "Authorization": `App ${apiKey}`,
         "Content-Type": "application/json",
         "Accept": "application/json"
       },
-      body: JSON.stringify({
-        from: sender,
-        to: "96181202607",
-        content: { text: ovrloadMsg }
-      })
+      body: JSON.stringify(ovrloadPayload)
     });
     const ovrData = await resOvr.json().catch(() => ({}));
-    console.log(`[infobip_dispatch] Sent to OVR LOAD (96181202607): status=${resOvr.status}`, JSON.stringify(ovrData));
+    console.log(`[infobip_template_dispatch] Sent template "new_order_to_branch" to OVR LOAD (96181202607): status=${resOvr.status}`, JSON.stringify(ovrData));
   } catch (err) {
-    console.error("[infobip_dispatch] Error sending to OVR LOAD:", err);
+    console.error("[infobip_template_dispatch] Error sending template to OVR LOAD:", err);
   }
 
-  // 2. CLIENT ORDER CONFIRMATION (Sent to customerPhone)
+  // 2. CLIENT ORDER CONFIRMATION TEMPLATE (order_confirmation)
   if (customerPhone) {
     let clientTo = String(customerPhone).replace(/\D/g, "");
     if (clientTo.startsWith("00")) clientTo = clientTo.slice(2);
     if (clientTo.startsWith("0") && clientTo.length === 8) clientTo = `961${clientTo.slice(1)}`;
     if (!clientTo.startsWith("961") && clientTo.length >= 7 && clientTo.length <= 8) clientTo = `961${clientTo}`;
 
-    const clientMsg = `🛒 *Order #${orderId} Confirmed - OVR LOAD*\n\n*Order Type:* ${String(orderType || "delivery").toUpperCase()}\n\n*Items:*\n${itemsText}\n\n*Subtotal:* $${Number(subtotal || 0).toFixed(2)}\n*Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\n*Total:* $${Number(total || 0).toFixed(2)}\n*Time:* ${deliveryTime || "ASAP"}\n\nThank you for ordering with OVR LOAD! 🙏`;
+    const clientPayload = {
+      messages: [
+        {
+          from: sender,
+          to: clientTo,
+          content: {
+            templateName: "order_confirmation",
+            templateData: {
+              body: {
+                placeholders: [
+                  String(orderId),
+                  "OVR LOAD",
+                  itemsText || "No items listed",
+                  `$${Number(total || 0).toFixed(2)}`
+                ]
+              }
+            },
+            language: "en"
+          }
+        }
+      ]
+    };
 
     try {
-      const resCli = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+      const resCli = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
         method: "POST",
         headers: {
           "Authorization": `App ${apiKey}`,
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        body: JSON.stringify({
-          from: sender,
-          to: clientTo,
-          content: { text: clientMsg }
-        })
+        body: JSON.stringify(clientPayload)
       });
       const cliData = await resCli.json().catch(() => ({}));
-      console.log(`[infobip_dispatch] Sent to Client (${clientTo}): status=${resCli.status}`, JSON.stringify(cliData));
+      console.log(`[infobip_template_dispatch] Sent template "order_confirmation" to Client (${clientTo}): status=${resCli.status}`, JSON.stringify(cliData));
     } catch (err) {
-      console.error("[infobip_dispatch] Error sending to Client:", err);
+      console.error("[infobip_template_dispatch] Error sending template to Client:", err);
     }
   }
 }
