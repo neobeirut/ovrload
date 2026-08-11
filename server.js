@@ -427,6 +427,7 @@ app.post('/api/calculate-delivery', async (req, res) => {
 });
 
 // Helper function to send automated WhatsApp notifications via Infobip Template API
+// Helper function to send automated WhatsApp notifications via Infobip API (Hybrid Text + Template)
 async function sendInfobipOrderNotifications({
   orderId,
   customerName,
@@ -441,115 +442,127 @@ async function sendInfobipOrderNotifications({
   lng,
   orderType
 }) {
-  console.log(`[infobip_template_dispatch] START for Order #${orderId}`);
+  console.log(`[infobip_dispatch] START for Order #${orderId}`);
   const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "15558376100").replace("+", "").trim();
 
-  // WhatsApp Meta policy prohibits newlines (\n) or tabs in template body placeholders
-  const itemsTextClean = (items || [])
+  // Multi-line items list
+  const multiLineItems = (items || [])
+    .map((i) => `• ${i.qty || 1}x *${i.name || i.product_name || "Item"}* ($${Number((i.unit_price_usd || 0) * (i.qty || 1)).toFixed(2)})`)
+    .join("\r\n");
+
+  // Single-line items list for template fallback
+  const singleLineItems = (items || [])
     .map((i) => `• ${i.qty || 1}x ${i.name || i.product_name || "Item"}`)
     .join("  ");
 
-  // Clean address from duplicate links and newlines
-  const cleanAddress = String(deliveryAddress || "Pickup / Not specified")
-    .replace(/\[Maps Pin:.*?\]/gi, "")
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleanAddr = String(deliveryAddress || "Pickup / Not specified").replace(/\[Maps Pin:.*?\]/gi, "").replace(/[\r\n]+/g, " ").trim();
+  const gpsLink = (lat && lng) ? `https://maps.google.com/?q=${lat},${lng}` : null;
 
-  const cleanCustomer = `${customerName || "Customer"} (${customerPhone || "N/A"})`
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Helper for sending a message via Text API with Template Fallback
+  async function sendMessageSmart(toPhone, multiLineText, templatePlaceholderText) {
+    let target = String(toPhone).replace(/\D/g, "");
+    if (target.startsWith("00")) target = target.slice(2);
+    if (target.startsWith("0") && target.length === 8) target = `961${target.slice(1)}`;
+    if (!target.startsWith("961") && target.length >= 7 && target.length <= 8) target = `961${target}`;
 
-  const gpsStr = (lat && lng) ? `  🔹  🗺️ GPS: https://maps.google.com/?q=${lat},${lng}` : "";
-
-  // 1. OVR LOAD MERCHANT NOTIFICATION (sent to 96181202607)
-  const ovrloadSummary = `OVR LOAD  🔹  👤 Cust: ${cleanCustomer}  🔹  📍 Addr: ${cleanAddress}${gpsStr}  🔹  🛒 Items: ${itemsTextClean}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
-
-  const ovrloadPayload = {
-    messages: [
-      {
-        from: sender,
-        to: "96181202607",
-        content: {
-          templateName: "order_confirmation",
-          templateData: {
-            body: {
-              placeholders: [
-                String(orderId),
-                ovrloadSummary
-              ]
-            }
-          },
-          language: "en"
-        }
-      }
-    ]
-  };
-
-  try {
-    const resOvr = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
-      method: "POST",
-      headers: {
-        "Authorization": `App ${apiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify(ovrloadPayload)
-    });
-    const ovrData = await resOvr.json().catch(() => ({}));
-    console.log(`[infobip_template_dispatch] Sent merchant notification to OVR LOAD (96181202607): status=${resOvr.status}`, JSON.stringify(ovrData));
-  } catch (err) {
-    console.error("[infobip_template_dispatch] Error sending merchant notification:", err);
-  }
-
-  // 2. CLIENT ORDER CONFIRMATION (sent to customerPhone)
-  if (customerPhone) {
-    let clientTo = String(customerPhone).replace(/\D/g, "");
-    if (clientTo.startsWith("00")) clientTo = clientTo.slice(2);
-    if (clientTo.startsWith("0") && clientTo.length === 8) clientTo = `961${clientTo.slice(1)}`;
-    if (!clientTo.startsWith("961") && clientTo.length >= 7 && clientTo.length <= 8) clientTo = `961${clientTo}`;
-
-    const clientSummary = `OVR LOAD  🔹  🛒 Items: ${itemsTextClean}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
-
-    const clientPayload = {
-      messages: [
-        {
-          from: sender,
-          to: clientTo,
-          content: {
-            templateName: "order_confirmation",
-            templateData: {
-              body: {
-                placeholders: [
-                  String(orderId),
-                  clientSummary
-                ]
-              }
-            },
-            language: "en"
-          }
-        }
-      ]
-    };
-
+    // 1. Try Free-Form Text API (Multi-Line formatted)
     try {
-      const resCli = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
+      const textRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
         method: "POST",
         headers: {
           "Authorization": `App ${apiKey}`,
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
-        body: JSON.stringify(clientPayload)
+        body: JSON.stringify({
+          from: sender,
+          to: target,
+          content: { text: multiLineText }
+        })
       });
-      const cliData = await resCli.json().catch(() => ({}));
-      console.log(`[infobip_template_dispatch] Sent client confirmation to Client (${clientTo}): status=${resCli.status}`, JSON.stringify(cliData));
-    } catch (err) {
-      console.error("[infobip_template_dispatch] Error sending client confirmation:", err);
+      const textData = await textRes.json().catch(() => ({}));
+      const msgStatus = textData?.messages?.[0]?.status;
+
+      if (textRes.ok && msgStatus && msgStatus.name !== "REJECTED_NO_SESSION" && msgStatus.id !== 7010) {
+        console.log(`[infobip_dispatch] Multi-line text sent successfully to ${target}: status=${textRes.status}`, JSON.stringify(textData));
+        return;
+      }
+      console.warn(`[infobip_dispatch] Text API skipped/rejected for ${target} (${msgStatus?.name || "No session"}), falling back to template...`);
+    } catch (e) {
+      console.warn(`[infobip_dispatch] Text API error for ${target}, falling back to template:`, e.message);
     }
+
+    // 2. Fallback to Approved Template API
+    try {
+      const tplRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
+        method: "POST",
+        headers: {
+          "Authorization": `App ${apiKey}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          messages: [
+            {
+              from: sender,
+              to: target,
+              content: {
+                templateName: "order_confirmation",
+                templateData: {
+                  body: {
+                    placeholders: [
+                      String(orderId),
+                      templatePlaceholderText
+                    ]
+                  }
+                },
+                language: "en"
+              }
+            }
+          ]
+        })
+      });
+      const tplData = await tplRes.json().catch(() => ({}));
+      console.log(`[infobip_dispatch] Template sent to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
+    } catch (err) {
+      console.error(`[infobip_dispatch] Template API error for ${target}:`, err);
+    }
+  }
+
+  // 1. OVR LOAD MERCHANT NOTIFICATION (96181202607)
+  let merchantText = `🍔 *NEW ORDER RECEIVED - OVR LOAD*\r\n`;
+  merchantText += `================================\r\n\r\n`;
+  merchantText += `*Customer Details:*\r\n`;
+  merchantText += `• *Name:* ${customerName || "Customer"}\r\n`;
+  merchantText += `• *Phone:* ${customerPhone || "N/A"}\r\n`;
+  merchantText += `• *Order Type:* ${String(orderType || "delivery").toUpperCase()}\r\n`;
+  merchantText += `• *Delivery Address:* ${cleanAddr}\r\n`;
+  if (gpsLink) merchantText += `📍 *GPS Location:* ${gpsLink}\r\n`;
+  merchantText += `\r\n*Items Ordered:*\r\n${multiLineItems}\r\n\r\n`;
+  merchantText += `*Payment Summary:*\r\n`;
+  merchantText += `• *Subtotal:* $${Number(subtotal || 0).toFixed(2)}\r\n`;
+  if (deliveryFee) merchantText += `• *Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
+  merchantText += `• *Total Amount:* $${Number(total || 0).toFixed(2)}`;
+
+  const merchantTemplatePlaceholder = `OVR LOAD  🔹  👤 ${customerName || "Customer"} (${customerPhone || "N/A"})  🔹  📍 ${cleanAddr}${gpsLink ? ` (GPS: ${gpsLink})` : ""}  🔹  🛒 ${singleLineItems}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
+
+  await sendMessageSmart("96181202607", merchantText, merchantTemplatePlaceholder);
+
+  // 2. CLIENT ORDER CONFIRMATION
+  if (customerPhone) {
+    let clientText = `✅ *ORDER CONFIRMED - OVR LOAD*\r\n`;
+    clientText += `================================\r\n`;
+    clientText += `Order #${orderId} has been received!\r\n\r\n`;
+    clientText += `*Items Ordered:*\r\n${multiLineItems}\r\n\r\n`;
+    clientText += `*Payment Summary:*\r\n`;
+    clientText += `• *Total Amount:* $${Number(total || 0).toFixed(2)}\r\n\r\n`;
+    clientText += `We are preparing your items now! Thank you for ordering from OVR LOAD.`;
+
+    const clientTemplatePlaceholder = `OVR LOAD  🔹  🛒 ${singleLineItems}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
+
+    await sendMessageSmart(customerPhone, clientText, clientTemplatePlaceholder);
   }
 }
 
