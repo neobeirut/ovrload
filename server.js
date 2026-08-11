@@ -679,6 +679,196 @@ app.post('/api/orders/save', async (req, res) => {
   }
 });
 
+// GET /driver/scan — Driver Scan Landing Page
+app.get('/driver/scan', (req, res) => {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OVR LOAD — Driver Order Dispatch</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 16px; padding: 24px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #ff5722; font-size: 1.5rem; }
+    p { color: #bbb; font-size: 0.95rem; line-height: 1.5; }
+    input { width: 100%; padding: 14px; margin: 16px 0; border-radius: 10px; border: 1px solid #444; background: #2a2a2a; color: #fff; font-size: 1rem; box-sizing: border-box; text-align: center; }
+    button { width: 100%; padding: 14px; background: #25d366; color: #fff; font-weight: bold; font-size: 1rem; border: none; border-radius: 10px; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #1ebd59; }
+    .status { margin-top: 16px; font-weight: bold; color: #4caf50; font-size: 1.1rem; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🛵 Delivery Order #<span id="orderIdText">...</span></h2>
+    <p>Scan confirmed! Enter your phone number once to receive complete order details & Google Maps PIN directly on WhatsApp.</p>
+    
+    <div id="formSection">
+      <input type="tel" id="driverPhoneInput" placeholder="Enter your phone number (e.g. 70123456)" />
+      <button onclick="dispatchToDriver()">Send to my WhatsApp</button>
+    </div>
+
+    <div id="statusSection" class="hidden">
+      <p class="status">✅ Order Dispatched to Your WhatsApp!</p>
+      <p style="font-size: 0.85rem; color: #888;">Check your WhatsApp inbox for customer phone number, delivery address & map pin.</p>
+    </div>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const orderId = urlParams.get('orderId') || urlParams.get('id');
+    document.getElementById('orderIdText').textContent = orderId || 'N/A';
+
+    const savedPhone = localStorage.getItem('ovrload_driver_phone');
+    if (savedPhone) {
+      document.getElementById('driverPhoneInput').value = savedPhone;
+      if (orderId) {
+        dispatchToDriver(savedPhone);
+      }
+    }
+
+    async function dispatchToDriver(phoneOverride) {
+      const phone = phoneOverride || document.getElementById('driverPhoneInput').value.trim();
+      if (!phone) {
+        alert('Please enter your phone number.');
+        return;
+      }
+
+      localStorage.setItem('ovrload_driver_phone', phone);
+      document.getElementById('formSection').classList.add('hidden');
+      document.getElementById('statusSection').classList.remove('hidden');
+
+      try {
+        await fetch('/api/driver/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId, driverPhone: phone })
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  </script>
+</body>
+</html>`;
+  res.send(html);
+});
+
+// POST /api/driver/scan — Dispatch order details to driver's WhatsApp via Infobip
+app.post('/api/driver/scan', async (req, res) => {
+  const { orderId, driverPhone } = req.body;
+  if (!orderId || !driverPhone) {
+    return res.status(400).json({ error: 'Order ID and Driver Phone number are required.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    const orderRes = await client.query(
+      \`SELECT o.*, u.name as customer_name, u.phone as customer_phone
+       FROM orders o
+       LEFT JOIN auth_users u ON o.user_id = u.id
+       WHERE o.id = $1 LIMIT 1\`,
+      [Number(orderId)]
+    );
+
+    if (orderRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+    const order = orderRes.rows[0];
+
+    const itemsRes = await client.query(
+      \`SELECT i.*, p.name as product_name
+       FROM order_items i
+       LEFT JOIN products p ON i.product_id = p.id
+       WHERE i.order_id = $1\`,
+      [Number(orderId)]
+    );
+    const items = itemsRes.rows;
+
+    const multiLineItems = items
+      .map((i) => \`• \${i.quantity}x *\${i.product_name || 'Item'}* ($\${Number(i.total_price || 0).toFixed(2)})\`)
+      .join('\\r\\n');
+
+    const singleLineItems = items
+      .map((i) => \`• \${i.quantity}x \${i.product_name || 'Item'}\`)
+      .join('  ');
+
+    const cleanAddr = String(order.delivery_address || 'Pickup / Not specified').replace(/\[Maps Pin:.*?\]/gi, '').replace(/[\\r\\n]+/g, ' ').trim();
+    const gpsLink = (order.latitude && order.longitude) ? \`https://maps.google.com/?q=\${order.latitude},\${order.longitude}\` : null;
+
+    let driverText = \`🛵 *DELIVERY ORDER ASSIGNMENT - OVR LOAD*\\r\\n\`;
+    driverText += \`================================\\r\\n\\r\\n\`;
+    driverText += \`*Order Number:* #\${order.id}\\r\\n\\r\\n\`;
+    driverText += \`*Customer Info:*\\r\\n\`;
+    driverText += \`• *Name:* \${order.customer_name || 'Customer'}\\r\\n\`;
+    driverText += \`• *Phone:* \${order.customer_phone || 'N/A'}\\r\\n\`;
+    driverText += \`• *Delivery Address:* \${cleanAddr}\\r\\n\`;
+    if (gpsLink) driverText += \`📍 *GPS Location:* \${gpsLink}\\r\\n\`;
+    driverText += \`\\r\\n*Items to Deliver:*\\r\\n\${multiLineItems}\\r\\n\\r\\n\`;
+    driverText += \`*Collect Payment:*\\r\\n\`;
+    driverText += \`• *Total Amount:* $\${Number(order.total_amount || 0).toFixed(2)}\`;
+
+    const templatePlaceholder = \`OVR LOAD  🔹  👤 \${order.customer_name || 'Cust'} (\${order.customer_phone || 'N/A'})  🔹  📍 \${cleanAddr}\${gpsLink ? \` (GPS: \${gpsLink})\` : ''}  🔹  🛒 \${singleLineItems}  🔹  💵 Collect Total: $\${Number(order.total_amount || 0).toFixed(2)}\`;
+
+    const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
+    const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\\/$/, "");
+    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "15558376100").replace("+", "").trim();
+
+    let target = String(driverPhone).replace(/\\D/g, "");
+    if (target.startsWith("00")) target = target.slice(2);
+    if (target.startsWith("0") && target.length === 8) target = \`961\${target.slice(1)}\`;
+    if (!target.startsWith("961") && target.length >= 7 && target.length <= 8) target = \`961\${target}\`;
+
+    let sentVia = "text";
+    try {
+      const textRes = await fetch(\`\${baseUrl}/whatsapp/1/message/text\`, {
+        method: "POST",
+        headers: {
+          "Authorization": \`App \${apiKey}\`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({ from: sender, to: target, content: { text: driverText } })
+      });
+      const textData = await textRes.json().catch(() => ({}));
+      const msgStatus = textData?.messages?.[0]?.status;
+
+      if (!textRes.ok || (msgStatus && (msgStatus.name === "REJECTED_NO_SESSION" || msgStatus.id === 7010))) {
+        sentVia = "template";
+        await fetch(\`\${baseUrl}/whatsapp/1/message/template\`, {
+          method: "POST",
+          headers: {
+            "Authorization": \`App \${apiKey}\`,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            messages: [{
+              from: sender,
+              to: target,
+              content: {
+                templateName: "order_confirmation",
+                templateData: { body: { placeholders: [String(order.id), templatePlaceholder] } },
+                language: "en"
+              }
+            }]
+          })
+        });
+      }
+    } catch (e) {
+      console.error("[driver_scan] Dispatch error:", e);
+    }
+
+    res.json({ success: true, orderId: order.id, driverPhone: target, sentVia });
+  } catch (err) {
+    console.error('Error dispatching to driver:', err);
+    res.status(500).json({ error: 'Failed to dispatch order to driver.' });
+  } finally {
+    client.release();
+  }
+});
+
 // Handle wildcard routing for frontend pages
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
