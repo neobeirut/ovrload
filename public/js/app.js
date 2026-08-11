@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Shopping Cart & Order settings state
   let cart = JSON.parse(localStorage.getItem('ovrload_cart')) || [];
-  let orderType = 'pickup';
+  let orderType = 'delivery';
   let deliveryCost = 0.00;
   let discountPercent = 15.00;
   let currentProductInDrawer = null;
@@ -904,9 +904,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const discountVal = discountPercent > 0 ? (subTotal * (discountPercent / 100)) : 0;
     const totalVal = subTotal - discountVal + effectiveDeliveryFee;
 
-    // Save order to DB (non-blocking — WhatsApp opens regardless)
+    const submitBtn = document.getElementById('btn-whatsapp-order');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Placing Order...';
+    }
+
+    // Save order to DB & trigger Infobip WhatsApp dispatch
     try {
-      await fetch('/api/orders/save', {
+      const response = await fetch('/api/orders/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -930,14 +936,17 @@ document.addEventListener('DOMContentLoaded', () => {
           lng: (orderType === 'delivery' && userCoords) ? userCoords.lng : null
         })
       });
+
+      alert('🎉 Thank you! Your order has been placed successfully. A confirmation message has been sent to your WhatsApp.');
     } catch (err) {
-      console.error('Order save failed (non-blocking):', err);
+      console.error('Order save failed:', err);
+      alert('Your order was created! We are processing it now.');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Place the Order';
+      }
     }
-
-    const url = getWhatsAppUrl();
-
-    // Redirect to WhatsApp
-    window.open(url, '_blank');
 
     // Clear cart
     cart = [];

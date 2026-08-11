@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
-  <title>ovrload | Official Menu</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>ovrload | Official Menu v2.5.4</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -19,7 +22,7 @@
     <!-- Sticky Search & Filters -->
     <section class="controls">
       <div class="discount-banner">
-        Order directly from this menu and send your order via WhatsApp to enjoy 15% OFF.
+        Order directly from this menu to enjoy fast delivery! <span style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 4px; font-weight: bold; margin-left: 6px;">v2.5.4</span>
       </div>
 
       <div class="category-scroller" id="category-scroller">
@@ -118,42 +121,22 @@
         <!-- Rendered dynamically -->
       </div>
 
-      <!-- Cost Summary -->
-      <div class="cart-summary-section">
-        <div class="summary-row">
-          <span>Subtotal</span>
-          <span id="cart-subtotal">$0.00</span>
-        </div>
-        <div class="summary-row discount-row" id="cart-discount-row" style="display: none;">
-          <span>WhatsApp Discount (<span id="cart-discount-percent">15</span>%)</span>
-          <span id="cart-discount-val">-$0.00</span>
-        </div>
-        <div class="summary-row">
-          <span>Delivery Fee</span>
-          <span id="cart-delivery-val">$0.00</span>
-        </div>
-        <div class="summary-row total-row">
-          <span>Total</span>
-          <span id="cart-total-val">$0.00</span>
-        </div>
-      </div>
-
       <!-- Checkout Form -->
       <form class="checkout-form" id="checkout-form">
         <h3 class="form-section-title">Order Type</h3>
 
         <div class="order-type-toggle">
-          <button type="button" class="order-type-btn active" id="btn-type-pickup">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: middle; display: inline-block;">
-              <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l1 12H4L5 9z"></path>
-            </svg>
-            Pickup
-          </button>
-          <button type="button" class="order-type-btn" id="btn-type-delivery">
+          <button type="button" class="order-type-btn active" id="btn-type-delivery">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: middle; display: inline-block;">
               <path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
             </svg>
             Delivery
+          </button>
+          <button type="button" class="order-type-btn" id="btn-type-pickup">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: middle; display: inline-block;">
+              <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l1 12H4L5 9z"></path>
+            </svg>
+            Pickup
           </button>
         </div>
 
@@ -169,7 +152,7 @@
           <input type="tel" class="form-input" id="order-phone" placeholder="+961 70 123 456" required>
         </div>
 
-        <div class="form-group" id="order-location-group" style="display: none;">
+        <div class="form-group" id="order-location-group">
           <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 0.25rem;">
             <label class="form-label" for="order-location" style="margin: 0;">Delivery Address</label>
             <button type="button" class="gps-btn" id="btn-gps-location">
@@ -198,11 +181,28 @@
           </div>
         </div>
 
-        <button type="submit" class="submit-btn whatsapp-btn" id="btn-whatsapp-order">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="whatsapp-icon-svg" style="margin-right: 8px; vertical-align: middle; display: inline-block;">
-            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-2.643-1.029-5.128-2.902-7.005-1.871-1.875-4.353-2.907-7-2.907-5.448 0-9.886 4.434-9.889 9.885-.001 2.125.567 4.2 1.597 5.879l-.998 3.647 3.734-.979zm11.233-7.514c-.307-.154-1.82-.899-2.102-1.002-.282-.102-.489-.153-.692.154-.204.307-.791.999-.97 1.203-.178.204-.358.225-.666.071-.307-.152-1.3-.479-2.474-1.527-.915-.815-1.531-1.823-1.711-2.13-.18-.307-.019-.473.134-.625.138-.138.307-.358.462-.538.154-.18.205-.307.307-.513.102-.205.051-.384-.026-.538-.077-.154-.692-1.667-.948-2.28-.249-.597-.502-.516-.692-.526l-.592-.012c-.204 0-.538.077-.82.384-.282.308-1.077 1.05-1.077 2.561 0 1.512 1.102 2.972 1.256 3.177.154.205 2.167 3.31 5.251 4.639.733.317 1.307.506 1.753.648.736.233 1.407.2 1.937.121.59-.088 1.82-.744 2.077-1.46.256-.717.256-1.332.179-1.46-.077-.128-.282-.205-.589-.359z"/>
-          </svg>
-          Send Order via WhatsApp
+        <!-- Cost Summary at Bottom -->
+        <div class="cart-summary-section" style="margin-top: 1.5rem; margin-bottom: 1.5rem; background: rgba(0,0,0,0.3); border-radius: 12px; padding: 1rem;">
+          <div class="summary-row">
+            <span>Subtotal</span>
+            <span id="cart-subtotal">$0.00</span>
+          </div>
+          <div class="summary-row discount-row" id="cart-discount-row" style="display: none;">
+            <span>Discount (<span id="cart-discount-percent">0</span>%)</span>
+            <span id="cart-discount-val">-$0.00</span>
+          </div>
+          <div class="summary-row">
+            <span>Delivery Fee</span>
+            <span id="cart-delivery-val">$0.00</span>
+          </div>
+          <div class="summary-row total-row" style="font-size: 1.2rem; font-weight: bold; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 0.5rem; margin-top: 0.5rem;">
+            <span>Total</span>
+            <span id="cart-total-val">$0.00</span>
+          </div>
+        </div>
+
+        <button type="submit" class="submit-btn" id="btn-whatsapp-order" style="background: #235b4e; color: white; border: none; font-weight: bold; font-size: 1.1rem; padding: 14px 20px; border-radius: 12px; width: 100%;">
+          Place the Order
         </button>
       </form>
     </div>
@@ -210,9 +210,9 @@
 
   <!-- Brand Footer -->
   <footer class="footer">
-    <span>&copy; <span id="year">2026</span> ovrload. All rights reserved.</span>
+    <span>&copy; <span id="year">2026</span> ovrload v2.5.4. All rights reserved.</span>
   </footer>
 
-  <script src="js/app.js?v=4"></script>
+  <script src="js/app.js?v=2.5.4"></script>
 </body>
 </html>
