@@ -532,9 +532,10 @@ async function sendInfobipOrderNotifications({
   }
 
   // 1. OVR LOAD MERCHANT NOTIFICATION (96181202607)
-  let merchantText = `🍔 *NEW ORDER RECEIVED - OVR LOAD*\r\n`;
+  let merchantText = `*NEW ORDER #${orderId} - OVR LOAD*\r\n`;
   merchantText += `================================\r\n\r\n`;
   merchantText += `*Customer Details:*\r\n`;
+  merchantText += `• *Order #:* ${orderId}\r\n`;
   merchantText += `• *Name:* ${customerName || "Customer"}\r\n`;
   merchantText += `• *Phone:* ${customerPhone || "N/A"}\r\n`;
   merchantText += `• *Order Type:* ${String(orderType || "delivery").toUpperCase()}\r\n`;
@@ -546,12 +547,16 @@ async function sendInfobipOrderNotifications({
   if (deliveryFee) merchantText += `• *Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
   merchantText += `• *Total Amount:* $${Number(total || 0).toFixed(2)}`;
 
-  const merchantTemplatePlaceholder = `OVR LOAD  🔹  👤 ${customerName || "Customer"} (${customerPhone || "N/A"})  🔹  📍 ${cleanAddr}${gpsLink ? ` (GPS: ${gpsLink})` : ""}  🔹  🛒 ${singleLineItems}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
+  // Send merchant notification (single clean message)
+  await sendMessageSmart("96181202607", merchantText, null);
 
-  await sendMessageSmart("96181202607", merchantText, merchantTemplatePlaceholder);
+  // 2. CLIENT ORDER CONFIRMATION (Sent only if customer phone is different from merchant phone)
+  let clientTarget = String(customerPhone || "").replace(/\D/g, "");
+  if (clientTarget.startsWith("00")) clientTarget = clientTarget.slice(2);
+  if (clientTarget.startsWith("0") && clientTarget.length === 8) clientTarget = `961${clientTarget.slice(1)}`;
+  if (!clientTarget.startsWith("961") && clientTarget.length >= 7 && clientTarget.length <= 8) clientTarget = `961${clientTarget}`;
 
-  // 2. CLIENT ORDER CONFIRMATION
-  if (customerPhone) {
+  if (clientTarget && clientTarget !== "96181202607") {
     let clientText = `✅ *ORDER CONFIRMED - OVR LOAD*\r\n`;
     clientText += `================================\r\n`;
     clientText += `Order #${orderId} has been received!\r\n\r\n`;
