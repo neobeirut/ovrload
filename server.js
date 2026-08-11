@@ -518,11 +518,15 @@ async function sendInfobipOrderNotifications({
           content: {
             templateName: "order_confirmation",
             templateData: {
+              header: {
+                type: "IMAGE",
+                mediaUrl: "https://ovrload-nine.vercel.app/images/logo.png"
+              },
               body: {
                 placeholders: [
+                  customerName || "Customer",
                   String(orderId),
                   "OVR LOAD",
-                  itemsTextClean || "Items listed",
                   `$${Number(total || 0).toFixed(2)}`
                 ]
               }
