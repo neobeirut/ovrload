@@ -444,7 +444,7 @@ async function sendInfobipOrderNotifications({
   console.log(`[infobip_template_dispatch] START for Order #${orderId}`);
   const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
-  const sender = "96176489078";
+  const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "15558376100").replace("+", "").trim();
 
   const itemsText = (items || [])
     .map((i) => `• ${i.qty || 1}x ${i.name} ($${Number((i.unit_price_usd || 0) * (i.qty || 1)).toFixed(2)})`)
@@ -494,7 +494,7 @@ async function sendInfobipOrderNotifications({
     console.error("[infobip_template_dispatch] Error sending template to OVR LOAD:", err);
   }
 
-  // 2. CLIENT ORDER CONFIRMATION TEMPLATE (order_confirmation)
+  // 2. CLIENT ORDER CONFIRMATION TEMPLATE (order_confirmation - MEDIA TEMPLATE)
   if (customerPhone) {
     let clientTo = String(customerPhone).replace(/\D/g, "");
     if (clientTo.startsWith("00")) clientTo = clientTo.slice(2);
@@ -509,6 +509,10 @@ async function sendInfobipOrderNotifications({
           content: {
             templateName: "order_confirmation",
             templateData: {
+              header: {
+                type: "IMAGE",
+                mediaUrl: "https://ovrload-nine.vercel.app/images/logo.png"
+              },
               body: {
                 placeholders: [
                   String(orderId),
