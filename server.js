@@ -446,11 +446,20 @@ async function sendInfobipOrderNotifications({
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "15558376100").replace("+", "").trim();
 
-  const itemsText = (items || [])
-    .map((i) => `• ${i.qty || 1}x ${i.name} ($${Number((i.unit_price_usd || 0) * (i.qty || 1)).toFixed(2)})`)
-    .join("\n");
+  // WhatsApp Meta policy prohibits newlines (\n) or tabs in template body placeholders
+  const itemsTextClean = (items || [])
+    .map((i) => `${i.qty || 1}x ${i.name || i.product_name || "Item"}`)
+    .join(", ");
 
-  const locLink = (lat && lng) ? `\n📍 GPS Location: https://maps.google.com/?q=${lat},${lng}` : "";
+  const cleanAddress = String(deliveryAddress || "Pickup / Not specified")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const cleanCustomerInfo = `${customerName || "Customer"} (${customerPhone || "N/A"})`
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   // 1. TEMPLATE NOTIFICATION FOR OVR LOAD (new_order_to_branch)
   const ovrloadPayload = {
@@ -465,10 +474,10 @@ async function sendInfobipOrderNotifications({
               placeholders: [
                 String(orderId),
                 "OVR LOAD",
-                itemsText || "No items listed",
+                itemsTextClean || "Items listed",
                 `$${Number(total || 0).toFixed(2)}`,
-                `${customerName || "N/A"} (${customerPhone || "N/A"})`,
-                deliveryAddress || "Pickup / Not specified"
+                cleanCustomerInfo,
+                cleanAddress
               ]
             }
           },
@@ -494,7 +503,7 @@ async function sendInfobipOrderNotifications({
     console.error("[infobip_template_dispatch] Error sending template to OVR LOAD:", err);
   }
 
-  // 2. CLIENT ORDER CONFIRMATION TEMPLATE (order_confirmation - MEDIA TEMPLATE)
+  // 2. CLIENT ORDER CONFIRMATION TEMPLATE (order_confirmation)
   if (customerPhone) {
     let clientTo = String(customerPhone).replace(/\D/g, "");
     if (clientTo.startsWith("00")) clientTo = clientTo.slice(2);
@@ -509,15 +518,11 @@ async function sendInfobipOrderNotifications({
           content: {
             templateName: "order_confirmation",
             templateData: {
-              header: {
-                type: "IMAGE",
-                mediaUrl: "https://ovrload-nine.vercel.app/images/logo.png"
-              },
               body: {
                 placeholders: [
                   String(orderId),
                   "OVR LOAD",
-                  itemsText || "No items listed",
+                  itemsTextClean || "Items listed",
                   `$${Number(total || 0).toFixed(2)}`
                 ]
               }
