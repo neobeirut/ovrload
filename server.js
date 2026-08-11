@@ -426,6 +426,86 @@ app.post('/api/calculate-delivery', async (req, res) => {
   }
 });
 
+// Helper function to send automated WhatsApp notifications via Infobip API
+async function sendInfobipOrderNotifications({
+  orderId,
+  customerName,
+  customerPhone,
+  deliveryAddress,
+  deliveryTime,
+  items,
+  subtotal,
+  deliveryFee,
+  total,
+  lat,
+  lng,
+  orderType
+}) {
+  console.log(`[infobip_dispatch] START for Order #${orderId}`);
+  const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
+  const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
+  const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96176489078").replace("+", "").trim();
+
+  const itemsText = (items || [])
+    .map((i) => `• ${i.qty || 1}x ${i.name} ($${Number((i.unit_price_usd || 0) * (i.qty || 1)).toFixed(2)})`)
+    .join("\n");
+
+  const locLink = (lat && lng) ? `\n📍 GPS Location: https://maps.google.com/?q=${lat},${lng}` : "";
+
+  // 1. FULL ORDER NOTIFICATION FOR OVR LOAD (Sent to 96181202607)
+  const ovrloadMsg = `🛒 *New Order #${orderId}*\n\n*Order Type:* ${String(orderType || "delivery").toUpperCase()}\n\n*Items:*\n${itemsText}\n\n*Subtotal:* $${Number(subtotal || 0).toFixed(2)}\n*Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\n*Total:* $${Number(total || 0).toFixed(2)}\n\n*Customer Name:* ${customerName || "N/A"}\n*Customer Phone:* ${customerPhone || "N/A"}\n*Delivery Address:* ${deliveryAddress || "Not specified"}${locLink}\n*Requested Time:* ${deliveryTime || "ASAP"}`;
+
+  try {
+    const resOvr = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+      method: "POST",
+      headers: {
+        "Authorization": `App ${apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        from: sender,
+        to: "96181202607",
+        content: { text: ovrloadMsg }
+      })
+    });
+    const ovrData = await resOvr.json().catch(() => ({}));
+    console.log(`[infobip_dispatch] Sent to OVR LOAD (96181202607): status=${resOvr.status}`, JSON.stringify(ovrData));
+  } catch (err) {
+    console.error("[infobip_dispatch] Error sending to OVR LOAD:", err);
+  }
+
+  // 2. CLIENT ORDER CONFIRMATION (Sent to customerPhone)
+  if (customerPhone) {
+    let clientTo = String(customerPhone).replace(/\D/g, "");
+    if (clientTo.startsWith("00")) clientTo = clientTo.slice(2);
+    if (clientTo.startsWith("0") && clientTo.length === 8) clientTo = `961${clientTo.slice(1)}`;
+    if (!clientTo.startsWith("961") && clientTo.length >= 7 && clientTo.length <= 8) clientTo = `961${clientTo}`;
+
+    const clientMsg = `🛒 *Order #${orderId} Confirmed - OVR LOAD*\n\n*Order Type:* ${String(orderType || "delivery").toUpperCase()}\n\n*Items:*\n${itemsText}\n\n*Subtotal:* $${Number(subtotal || 0).toFixed(2)}\n*Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\n*Total:* $${Number(total || 0).toFixed(2)}\n*Time:* ${deliveryTime || "ASAP"}\n\nThank you for ordering with OVR LOAD! 🙏`;
+
+    try {
+      const resCli = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+        method: "POST",
+        headers: {
+          "Authorization": `App ${apiKey}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          from: sender,
+          to: clientTo,
+          content: { text: clientMsg }
+        })
+      });
+      const cliData = await resCli.json().catch(() => ({}));
+      console.log(`[infobip_dispatch] Sent to Client (${clientTo}): status=${resCli.status}`, JSON.stringify(cliData));
+    } catch (err) {
+      console.error("[infobip_dispatch] Error sending to Client:", err);
+    }
+  }
+}
+
 // POST /api/orders/save — Save a WhatsApp order to the database
 app.post('/api/orders/save', async (req, res) => {
   const {
@@ -439,7 +519,8 @@ app.post('/api/orders/save', async (req, res) => {
     deliveryFee,
     total,
     lat,
-    lng
+    lng,
+    orderType
   } = req.body;
 
   if (!items || items.length === 0) {
@@ -463,7 +544,7 @@ app.post('/api/orders/save', async (req, res) => {
        RETURNING id`,
       [
         1,                           // branch_id (Ovrload single branch)
-        'delivery',                  // order_type
+        orderType || 'delivery',     // order_type
         deliveryAddress || '',       // delivery_address
         subtotal || 0,               // subtotal_amount
         deliveryFee || 0,            // delivery_fee
@@ -502,6 +583,23 @@ app.post('/api/orders/save', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // Trigger WhatsApp dispatch via Infobip
+    sendInfobipOrderNotifications({
+      orderId,
+      customerName,
+      customerPhone,
+      deliveryAddress,
+      deliveryTime,
+      items,
+      subtotal,
+      deliveryFee,
+      total,
+      lat,
+      lng,
+      orderType
+    }).catch(err => console.error("[infobip_dispatch] Async error:", err));
+
     res.json({ success: true, orderId });
   } catch (error) {
     await client.query('ROLLBACK');
