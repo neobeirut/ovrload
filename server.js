@@ -448,10 +448,12 @@ async function sendInfobipOrderNotifications({
 
   // WhatsApp Meta policy prohibits newlines (\n) or tabs in template body placeholders
   const itemsTextClean = (items || [])
-    .map((i) => `${i.qty || 1}x ${i.name || i.product_name || "Item"}`)
-    .join(", ");
+    .map((i) => `• ${i.qty || 1}x ${i.name || i.product_name || "Item"}`)
+    .join("  ");
 
+  // Clean address from duplicate links and newlines
   const cleanAddress = String(deliveryAddress || "Pickup / Not specified")
+    .replace(/\[Maps Pin:.*?\]/gi, "")
     .replace(/[\r\n]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -461,10 +463,10 @@ async function sendInfobipOrderNotifications({
     .replace(/\s+/g, " ")
     .trim();
 
-  const locLinkStr = (lat && lng) ? ` (GPS: maps.google.com/?q=${lat},${lng})` : "";
+  const gpsStr = (lat && lng) ? `  🔹  🗺️ GPS: https://maps.google.com/?q=${lat},${lng}` : "";
 
   // 1. OVR LOAD MERCHANT NOTIFICATION (sent to 96181202607)
-  const ovrloadSummary = `OVR LOAD | Cust: ${cleanCustomer} | Addr: ${cleanAddress}${locLinkStr} | Items: ${itemsTextClean} | Total: $${Number(total || 0).toFixed(2)}`;
+  const ovrloadSummary = `OVR LOAD  🔹  👤 Cust: ${cleanCustomer}  🔹  📍 Addr: ${cleanAddress}${gpsStr}  🔹  🛒 Items: ${itemsTextClean}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
 
   const ovrloadPayload = {
     messages: [
@@ -510,7 +512,7 @@ async function sendInfobipOrderNotifications({
     if (clientTo.startsWith("0") && clientTo.length === 8) clientTo = `961${clientTo.slice(1)}`;
     if (!clientTo.startsWith("961") && clientTo.length >= 7 && clientTo.length <= 8) clientTo = `961${clientTo}`;
 
-    const clientSummary = `OVR LOAD | Items: ${itemsTextClean} | Total: $${Number(total || 0).toFixed(2)}`;
+    const clientSummary = `OVR LOAD  🔹  🛒 Items: ${itemsTextClean}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
 
     const clientPayload = {
       messages: [
