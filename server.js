@@ -426,7 +426,83 @@ app.post('/api/calculate-delivery', async (req, res) => {
   }
 });
 
-// Helper function to send automated WhatsApp notifications via Infobip Template API
+// GET /api/orders/pending-delivery — delivery orders not yet picked up (for Driver Dispatch tab)
+app.get('/api/orders/pending-delivery', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT
+        o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
+        o.created_at, o.latitude, o.longitude,
+        u.name AS customer_name, u.phone AS customer_phone,
+        json_agg(json_build_object(
+          'quantity', oi.quantity,
+          'product_name', p.name,
+          'total_price', oi.total_price
+        ) ORDER BY oi.id) AS items
+      FROM orders o
+      LEFT JOIN auth_users u  ON o.user_id = u.id
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p    ON p.id = oi.product_id
+      WHERE o.order_type ILIKE 'delivery'
+        AND o.status IN ('pending', 'confirmed', 'ready')
+        AND o.created_at >= NOW() - INTERVAL '24 hours'
+      GROUP BY o.id, u.name, u.phone
+      ORDER BY o.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching pending delivery orders:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/orders/:id — single order detail (used by QR modal)
+app.get('/api/orders/:id', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT o.*, u.name AS customer_name, u.phone AS customer_phone
+      FROM orders o
+      LEFT JOIN auth_users u ON o.user_id = u.id
+      WHERE o.id = $1 LIMIT 1
+    `, [Number(req.params.id)]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching order:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/orders/:id/status — update order status (e.g. mark as delivered)
+app.patch('/api/orders/:id/status', requireAuth, async (req, res) => {
+  const { status } = req.body;
+  const allowed = ['pending', 'confirmed', 'ready', 'delivered', 'cancelled'];
+  if (!status || !allowed.includes(status)) {
+    return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
+  }
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id, status`,
+      [status, Number(req.params.id)]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
+    res.json({ success: true, order: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating order status:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    client.release();
+  }
+});
+
+
 // Helper function to send automated WhatsApp notifications via Infobip API (Hybrid Text + Template)
 async function sendInfobipOrderNotifications({
   orderId,

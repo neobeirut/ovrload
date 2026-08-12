@@ -340,5 +340,162 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/'/g, '&#039;');
   }
 
+
+  // ── Tab Switching ─────────────────────────────────────────────
+  const tabInventoryBtn  = document.getElementById('tab-inventory-btn');
+  const tabDispatchBtn   = document.getElementById('tab-dispatch-btn');
+  const dashboardLayout  = document.getElementById('dashboard-layout');
+  const dispatchPanel    = document.getElementById('dispatch-panel');
+
+  tabInventoryBtn.addEventListener('click', () => {
+    dashboardLayout.style.display = '';
+    dispatchPanel.style.display   = 'none';
+    tabInventoryBtn.classList.add('admin-tab-active');
+    tabDispatchBtn.classList.remove('admin-tab-active');
+  });
+
+  tabDispatchBtn.addEventListener('click', () => {
+    dashboardLayout.style.display = 'none';
+    dispatchPanel.style.display   = '';
+    tabDispatchBtn.classList.add('admin-tab-active');
+    tabInventoryBtn.classList.remove('admin-tab-active');
+    loadDispatchOrders();
+  });
+
+  document.getElementById('dispatch-refresh-btn').addEventListener('click', loadDispatchOrders);
+
+  // ── Dispatch Order Loading ────────────────────────────────────
+  async function loadDispatchOrders() {
+    const list = document.getElementById('dispatch-orders-list');
+    const stamp = document.getElementById('dispatch-last-refresh');
+    list.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);">Loading orders...</div>`;
+    try {
+      const res  = await fetch('api/orders/pending-delivery');
+      const orders = res.ok ? await res.json() : [];
+      stamp.textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+      renderDispatchOrders(orders);
+    } catch (e) {
+      list.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-secondary);">Connection error — check server.</div>`;
+    }
+  }
+
+  function timeAgo(isoString) {
+    const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+    if (diff < 60)  return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    return `${Math.floor(diff/3600)}h ago`;
+  }
+
+  function renderDispatchOrders(orders) {
+    const list = document.getElementById('dispatch-orders-list');
+    if (!orders.length) {
+      list.innerHTML = `
+        <div style="text-align:center;padding:4rem 2rem;">
+          <div style="font-size:3rem;margin-bottom:1rem;">🛵</div>
+          <div style="color:var(--text-secondary);font-size:1rem;">No pending delivery orders right now.</div>
+        </div>`;
+      return;
+    }
+    list.innerHTML = orders.map(o => {
+      const cleanAddr = (o.delivery_address || 'No address').replace(/\[Maps Pin:.*?\]/gi, '').trim();
+      const items = (o.items || []).map(i => `${i.quantity}x ${i.product_name || 'Item'}`).join(' • ') || '—';
+      const badgeClass = o.status === 'ready' ? 'dispatch-badge-ready' : o.status === 'confirmed' ? 'dispatch-badge-confirmed' : 'dispatch-badge-pending';
+      const badgeLabel = o.status === 'ready' ? '✓ Ready' : o.status === 'confirmed' ? '● Confirmed' : '⏳ Pending';
+      return `
+        <div class="dispatch-card">
+          <div class="dispatch-card-info">
+            <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:4px;">
+              <span class="dispatch-card-id">#${o.id}</span>
+              <span class="dispatch-badge ${badgeClass}">${badgeLabel}</span>
+              <span style="font-size:0.75rem;color:var(--text-tertiary);">${timeAgo(o.created_at)}</span>
+            </div>
+            <div class="dispatch-card-customer">👤 ${escapeHtml(o.customer_name || 'Customer')} — ${escapeHtml(o.customer_phone || '')}</div>
+            <div class="dispatch-card-address">📍 ${escapeHtml(cleanAddr)}</div>
+            <div class="dispatch-card-items">🛒 ${escapeHtml(items)}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.6rem;">
+            <span class="dispatch-total">$${Number(o.total_amount || 0).toFixed(2)}</span>
+            <button class="dispatch-qr-btn" onclick="showDriverQR(${o.id})">📱 Show QR</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── QR Modal ──────────────────────────────────────────────────
+  const qrModal      = document.getElementById('qr-modal');
+  const qrCanvas     = document.getElementById('qr-canvas');
+  const qrTitle      = document.getElementById('qr-order-title');
+  const qrCustomer   = document.getElementById('qr-order-customer');
+  const qrCloseBtn   = document.getElementById('qr-close-btn');
+  const qrPickupBtn  = document.getElementById('qr-pickup-btn');
+  let   currentQROrderId = null;
+
+  window.showDriverQR = function(orderId) {
+    currentQROrderId = orderId;
+    const url = `https://ovrload-nine.vercel.app/driver/scan?orderId=${orderId}`;
+
+    // Find order from rendered list
+    fetch(`api/orders/${orderId}`)
+      .then(r => r.ok ? r.json() : {})
+      .then(o => {
+        qrTitle.textContent    = `Order #${orderId}`;
+        qrCustomer.textContent = `${o.customer_name || 'Customer'} — ${o.customer_phone || ''} | $${Number(o.total_amount||0).toFixed(2)}`;
+      })
+      .catch(() => { qrTitle.textContent = `Order #${orderId}`; });
+
+    // Generate QR
+    qrCanvas.innerHTML = '';
+    new QRCode(qrCanvas, {
+      text:         url,
+      width:        220,
+      height:       220,
+      colorDark:    '#000000',
+      colorLight:   '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+
+    qrModal.style.display = 'flex';
+  };
+
+  qrCloseBtn.addEventListener('click', () => {
+    qrModal.style.display = 'none';
+    currentQROrderId = null;
+  });
+
+  qrModal.addEventListener('click', (e) => {
+    if (e.target === qrModal) { qrModal.style.display = 'none'; currentQROrderId = null; }
+  });
+
+  qrPickupBtn.addEventListener('click', async () => {
+    if (!currentQROrderId) return;
+    qrPickupBtn.textContent = 'Updating...';
+    qrPickupBtn.disabled = true;
+    try {
+      const res = await fetch(`api/orders/${currentQROrderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'delivered' })
+      });
+      if (res.ok) {
+        qrModal.style.display = 'none';
+        currentQROrderId = null;
+        loadDispatchOrders(); // Refresh list
+      } else {
+        alert('Failed to update order status.');
+      }
+    } catch (e) {
+      alert('Connection error.');
+    } finally {
+      qrPickupBtn.textContent = '✅ Mark as Picked Up';
+      qrPickupBtn.disabled = false;
+    }
+  });
+
+  // Auto-refresh dispatch every 30s when tab is active
+  setInterval(() => {
+    if (dispatchPanel.style.display !== 'none') loadDispatchOrders();
+  }, 30000);
+
   loadInventory();
 });
+

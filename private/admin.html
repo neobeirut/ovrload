@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ovrload | Admin Panel</title>
   <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -18,7 +19,9 @@
         <span style="font-size: 0.8rem; color: var(--text-tertiary); margin-left: 0.5rem; font-weight: 600;">ADMIN</span>
       </div>
       <div class="admin-nav-actions">
-        <a href="./" class="admin-nav-btn admin-nav-btn-secondary">View Public Menu</a>
+        <button id="tab-inventory-btn" class="admin-nav-btn admin-nav-btn-secondary admin-tab-active">📦 Inventory</button>
+        <button id="tab-dispatch-btn" class="admin-nav-btn admin-nav-btn-secondary">🛵 Driver Dispatch</button>
+        <a href="./" class="admin-nav-btn admin-nav-btn-secondary">View Menu</a>
         <button id="logout-btn" class="admin-nav-btn admin-nav-btn-danger">Log Out</button>
       </div>
     </nav>
@@ -67,6 +70,22 @@
           </table>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Driver Dispatch Panel -->
+  <div id="dispatch-panel" class="wrapper" style="display:none;">
+    <div class="admin-container">
+      <div class="admin-header">
+        <h1 class="admin-title">🛵 Driver Dispatch</h1>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <span id="dispatch-last-refresh" style="font-size:0.8rem; color:var(--text-tertiary);"></span>
+          <button class="add-btn" id="dispatch-refresh-btn" style="background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid var(--surface-border);">
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+      <div id="dispatch-orders-list"></div>
     </div>
   </div>
 
@@ -159,6 +178,20 @@
     </div>
   </div>
 
-  <script src="js/admin.js?v=2"></script>
+  <!-- QR Code Full-Screen Modal -->
+  <div id="qr-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:9999; display:none; flex-direction:column; align-items:center; justify-content:center; padding:2rem;">
+    <div style="background:#1a1a1a; border:1px solid #333; border-radius:20px; padding:2rem; max-width:420px; width:100%; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.8);">
+      <h2 id="qr-order-title" style="margin:0 0 0.25rem; color:#ff5722; font-size:1.4rem;">Order #</h2>
+      <p id="qr-order-customer" style="margin:0 0 1.25rem; color:#aaa; font-size:0.9rem;"></p>
+      <div id="qr-canvas" style="display:flex; justify-content:center; margin-bottom:1rem;"></div>
+      <p style="color:#888; font-size:0.8rem; margin-bottom:1.5rem;">Driver: scan with your phone camera to receive order details on WhatsApp</p>
+      <div style="display:flex; gap:0.75rem; justify-content:center;">
+        <button id="qr-pickup-btn" style="flex:1; padding:14px; background:#25d366; color:#fff; font-weight:bold; font-size:1rem; border:none; border-radius:10px; cursor:pointer;">✅ Mark as Picked Up</button>
+        <button id="qr-close-btn" style="padding:14px 20px; background:rgba(255,255,255,0.08); color:#ccc; font-size:1rem; border:1px solid #444; border-radius:10px; cursor:pointer;">✕ Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/admin.js?v=3"></script>
 </body>
 </html>
