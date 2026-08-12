@@ -284,11 +284,12 @@
       })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-          if (data.success || data.sentVia) {
-            showToast('Details sent to WhatsApp!');
+          if (data.waUrl) {
+            window.open(data.waUrl, '_blank');
+            showToast('WhatsApp opened!');
             closeModal();
           } else {
-            showToast(data.error || 'Could not send');
+            showToast(data.error || 'Could not build link');
           }
         })
         .catch(function() { showToast('Connection error'); })
