@@ -1,4 +1,4 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -878,7 +878,7 @@ app.get('/driver/scan', (req, res) => {
   res.send(lines.join('\n'));
 });
 
-// POST /api/driver/scan — Return wa.me URL with delivery details (no Infobip session needed)
+// POST /api/driver/scan — Send delivery details to driver via Infobip WhatsApp template
 app.post('/api/driver/scan', async (req, res) => {
   const { orderId, driverPhone, phone } = req.body;
   const phoneNum = driverPhone || phone;
@@ -896,35 +896,79 @@ app.post('/api/driver/scan', async (req, res) => {
       'SELECT i.*, p.name as product_name FROM order_items i LEFT JOIN products p ON i.product_id = p.id WHERE i.order_id = $1',
       [Number(orderId)]
     );
+    const items = itemsRes.rows;
 
-    const itemLines = itemsRes.rows
-      .map(i => '• ' + i.quantity + 'x ' + (i.product_name || 'Item') + ' ($' + Number(i.total_price || 0).toFixed(2) + ')')
+    const multiLineItems = items
+      .map(i => '• ' + i.quantity + 'x *' + (i.product_name || 'Item') + '* ($' + Number(i.total_price || 0).toFixed(2) + ')')
       .join('\n');
 
     const cleanAddr = String(order.delivery_address || 'Pickup')
       .replace(/\[Maps Pin:[^\]]*\]/gi, '').replace(/[\r\n]+/g, ' ').trim() || 'Pickup';
 
-    // Build the message
-    let msg = '🛵 *DELIVERY - OVR LOAD*\n';
-    msg += '━━━━━━━━━━━━━━━━━━━━━━\n\n';
-    msg += '*Order:* #' + order.id + '\n\n';
-    msg += '*Customer:* ' + (order.customer_name || '-') + '\n';
-    msg += '*Phone:* ' + (order.customer_phone || 'N/A') + '\n';
-    msg += '*Address:* ' + cleanAddr + '\n\n';
-    msg += '*Items:*\n' + itemLines + '\n\n';
-    msg += '*Collect:* $' + Number(order.total_amount || 0).toFixed(2);
+    // Full delivery message
+    let driverText = '🛵 *DELIVERY ORDER - OVR LOAD*\n';
+    driverText += '━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+    driverText += '*Order:* #' + order.id + '\n\n';
+    driverText += '*Customer:* ' + (order.customer_name || '-') + '\n';
+    driverText += '*Phone:* ' + (order.customer_phone || 'N/A') + '\n';
+    driverText += '*Address:* ' + cleanAddr + '\n\n';
+    driverText += '*Items:*\n' + multiLineItems + '\n\n';
+    driverText += '*Collect:* $' + Number(order.total_amount || 0).toFixed(2);
 
-    // Normalize phone: strip non-digits, add 961 if Lebanese local
+    // Normalize phone
     let target = String(phoneNum).replace(/\D/g, '');
     if (target.startsWith('00')) target = target.slice(2);
     if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
     if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
 
-    const waUrl = 'https://wa.me/' + target + '?text=' + encodeURIComponent(msg);
-    res.json({ success: true, orderId: order.id, waUrl });
+    const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
+    const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
+    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || '15558376100').replace('+', '').trim();
+
+    // wa.me fallback URL (in case Infobip fails)
+    const waUrl = 'https://wa.me/' + target + '?text=' + encodeURIComponent(driverText);
+
+    let sentVia = null;
+    try {
+      // Try template first (works without active session)
+      const tplRes = await fetch(baseUrl + '/whatsapp/1/message/template', {
+        method: 'POST',
+        headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({
+          messages: [{
+            from: sender,
+            to: target,
+            content: {
+              templateName: 'order_confirmation',
+              templateData: { body: { placeholders: [String(order.id), driverText] } },
+              language: 'en'
+            }
+          }]
+        })
+      });
+      const tplData = await tplRes.json().catch(() => ({}));
+      const tplStatus = tplData && tplData.messages && tplData.messages[0] ? tplData.messages[0].status : null;
+      console.log('[driver_scan] Template result:', tplRes.status, tplStatus && tplStatus.name);
+
+      if (tplRes.ok && tplStatus && tplStatus.groupId !== 2) {
+        sentVia = 'template';
+      } else {
+        // Template failed — try plain text (needs active session, may fail with 7010)
+        await fetch(baseUrl + '/whatsapp/1/message/text', {
+          method: 'POST',
+          headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ from: sender, to: target, content: { text: driverText } })
+        });
+        sentVia = 'text';
+      }
+    } catch (e) {
+      console.error('[driver_scan] Infobip error:', e.message);
+    }
+
+    res.json({ success: true, orderId: order.id, sentVia, waUrl });
   } catch (err) {
-    console.error('Error building driver dispatch:', err);
-    res.status(500).json({ error: 'Failed to build dispatch URL.' });
+    console.error('Error dispatching to driver:', err);
+    res.status(500).json({ error: 'Failed to dispatch.' });
   } finally {
     client.release();
   }
