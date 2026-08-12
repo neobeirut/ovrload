@@ -757,7 +757,8 @@ app.post('/api/calculate-delivery', async (req, res) => {
 });
 
 // GET /api/orders/pending-delivery — delivery orders not yet picked up (for Driver Dispatch tab)
-app.get('/api/orders/pending-delivery', requireAuth, async (req, res) => {
+// No auth required — driver app runs on Android with no admin session
+app.get('/api/orders/pending-delivery', async (req, res) => {
   const client = await pool.connect();
   try {
     const result = await client.query(`
@@ -773,7 +774,7 @@ app.get('/api/orders/pending-delivery', requireAuth, async (req, res) => {
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p    ON p.id = oi.product_id
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
-        AND o.status IN ('pending', 'confirmed', 'ready', 'completed')
+        AND o.status NOT IN ('cancelled', 'completed', 'delivered')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
       GROUP BY o.id
       ORDER BY o.created_at DESC
@@ -806,7 +807,8 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
 });
 
 // PATCH /api/orders/:id/status — update order status (e.g. mark as delivered)
-app.patch('/api/orders/:id/status', requireAuth, async (req, res) => {
+// No auth required — driver marks orders as picked up from Android
+app.patch('/api/orders/:id/status', async (req, res) => {
   const { status } = req.body;
   const allowed = ['pending', 'confirmed', 'ready', 'delivered', 'cancelled'];
   if (!status || !allowed.includes(status)) {
