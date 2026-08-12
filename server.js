@@ -1051,26 +1051,6 @@ app.post('/api/orders/save', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Await WhatsApp dispatch via Infobip so Vercel serverless process doesn't terminate early
-    try {
-      await sendInfobipOrderNotifications({
-        orderId,
-        customerName,
-        customerPhone,
-        deliveryAddress,
-        deliveryTime,
-        items,
-        subtotal,
-        deliveryFee,
-        total,
-        lat,
-        lng,
-        orderType
-      });
-    } catch (err) {
-      console.error("[infobip_dispatch] Error:", err);
-    }
-
     res.json({ success: true, orderId });
   } catch (error) {
     await client.query('ROLLBACK');

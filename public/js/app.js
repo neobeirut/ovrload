@@ -910,7 +910,7 @@ document.addEventListener('DOMContentLoaded', () => {
       submitBtn.innerText = 'Placing Order...';
     }
 
-    // Save order to DB & trigger Infobip WhatsApp dispatch
+    // Save order to DB, then open WhatsApp so customer confirms directly
     try {
       const response = await fetch('/api/orders/save', {
         method: 'POST',
@@ -937,7 +937,8 @@ document.addEventListener('DOMContentLoaded', () => {
         })
       });
 
-      alert('🎉 Thank you! Your order has been placed successfully. A confirmation message has been sent to your WhatsApp.');
+      // Open WhatsApp with pre-filled order - customer sends it to OVR LOAD
+      window.open(getWhatsAppUrl(), '_blank');
     } catch (err) {
       console.error('Order save failed:', err);
       alert('Your order was created! We are processing it now.');
