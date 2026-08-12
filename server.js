@@ -837,7 +837,7 @@ app.post('/api/driver/scan', async (req, res) => {
   const client = await pool.connect();
   try {
     const orderRes = await client.query(
-      `SELECT * FROM orders WHERE id = $1 LIMIT 1`,
+      'SELECT * FROM orders WHERE id = $1 LIMIT 1',
       [Number(orderId)]
     );
 
@@ -847,86 +847,75 @@ app.post('/api/driver/scan', async (req, res) => {
     const order = orderRes.rows[0];
 
     const itemsRes = await client.query(
-      \`SELECT i.*, p.name as product_name
-       FROM order_items i
-       LEFT JOIN products p ON i.product_id = p.id
-       WHERE i.order_id = $1\`,
+      'SELECT i.*, p.name as product_name FROM order_items i LEFT JOIN products p ON i.product_id = p.id WHERE i.order_id = $1',
       [Number(orderId)]
     );
     const items = itemsRes.rows;
 
     const multiLineItems = items
-      .map((i) => \`• \${i.quantity}x *\${i.product_name || 'Item'}* ($\${Number(i.total_price || 0).toFixed(2)})\`)
-      .join('\\r\\n');
+      .map((i) => '• ' + i.quantity + 'x *' + (i.product_name || 'Item') + '* ($' + Number(i.total_price || 0).toFixed(2) + ')')
+      .join('\r\n');
 
     const singleLineItems = items
-      .map((i) => \`• \${i.quantity}x \${i.product_name || 'Item'}\`)
+      .map((i) => '• ' + i.quantity + 'x ' + (i.product_name || 'Item'))
       .join('  ');
 
-    const cleanAddr = String(order.delivery_address || 'Pickup / Not specified').replace(/\[Maps Pin:.*?\]/gi, '').replace(/[\\r\\n]+/g, ' ').trim();
-    const gpsLink = null; // GPS coordinates not stored in orders table
+    const cleanAddr = String(order.delivery_address || 'Pickup / Not specified')
+      .replace(/\[Maps Pin:.*?\]/gi, '').replace(/[\r\n]+/g, ' ').trim();
 
-    let driverText = \`🛵 *DELIVERY ORDER ASSIGNMENT - OVR LOAD*\\r\\n\`;
-    driverText += \`================================\\r\\n\\r\\n\`;
-    driverText += \`*Order Number:* #\${order.id}\\r\\n\\r\\n\`;
-    driverText += \`*Customer Info:*\\r\\n\`;
-    driverText += \`• *Name:* \${order.customer_name || 'Customer'}\\r\\n\`;
-    driverText += \`• *Phone:* \${order.customer_phone || 'N/A'}\\r\\n\`;
-    driverText += \`• *Delivery Address:* \${cleanAddr}\\r\\n\`;
-    if (gpsLink) driverText += \`📍 *GPS Location:* \${gpsLink}\\r\\n\`;
-    driverText += \`\\r\\n*Items to Deliver:*\\r\\n\${multiLineItems}\\r\\n\\r\\n\`;
-    driverText += \`*Collect Payment:*\\r\\n\`;
-    driverText += \`• *Total Amount:* $\${Number(order.total_amount || 0).toFixed(2)}\`;
+    let driverText = '🛵 *DELIVERY ORDER ASSIGNMENT - OVR LOAD*\r\n';
+    driverText += '================================\r\n\r\n';
+    driverText += '*Order Number:* #' + order.id + '\r\n\r\n';
+    driverText += '*Customer Info:*\r\n';
+    driverText += '• *Name:* ' + (order.customer_name || 'Customer') + '\r\n';
+    driverText += '• *Phone:* ' + (order.customer_phone || 'N/A') + '\r\n';
+    driverText += '• *Delivery Address:* ' + cleanAddr + '\r\n';
+    driverText += '\r\n*Items to Deliver:*\r\n' + multiLineItems + '\r\n\r\n';
+    driverText += '*Collect Payment:*\r\n';
+    driverText += '• *Total Amount:* $' + Number(order.total_amount || 0).toFixed(2);
 
-    const templatePlaceholder = \`OVR LOAD  🔹  👤 \${order.customer_name || 'Cust'} (\${order.customer_phone || 'N/A'})  🔹  📍 \${cleanAddr}\${gpsLink ? \` (GPS: \${gpsLink})\` : ''}  🔹  🛒 \${singleLineItems}  🔹  💵 Collect Total: $\${Number(order.total_amount || 0).toFixed(2)}\`;
+    const templatePlaceholder = 'OVR LOAD  🔹  👤 ' + (order.customer_name || 'Cust') +
+      ' (' + (order.customer_phone || 'N/A') + ')  🔹  📍 ' + cleanAddr +
+      '  🔹  🛒 ' + singleLineItems + '  🔹  💵 Collect Total: $' + Number(order.total_amount || 0).toFixed(2);
 
-    const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
-    const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\\/$/, "");
-    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "15558376100").replace("+", "").trim();
+    const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
+    const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
+    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || '15558376100').replace('+', '').trim();
 
-    let target = String(driverPhone).replace(/\\D/g, "");
-    if (target.startsWith("00")) target = target.slice(2);
-    if (target.startsWith("0") && target.length === 8) target = \`961\${target.slice(1)}\`;
-    if (!target.startsWith("961") && target.length >= 7 && target.length <= 8) target = \`961\${target}\`;
+    let target = String(driverPhone).replace(/\D/g, '');
+    if (target.startsWith('00')) target = target.slice(2);
+    if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
+    if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
 
-    let sentVia = "text";
+    let sentVia = 'text';
     try {
-      const textRes = await fetch(\`\${baseUrl}/whatsapp/1/message/text\`, {
-        method: "POST",
-        headers: {
-          "Authorization": \`App \${apiKey}\`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
+      const textRes = await fetch(baseUrl + '/whatsapp/1/message/text', {
+        method: 'POST',
+        headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ from: sender, to: target, content: { text: driverText } })
       });
       const textData = await textRes.json().catch(() => ({}));
-      const msgStatus = textData?.messages?.[0]?.status;
+      const msgStatus = textData && textData.messages && textData.messages[0] ? textData.messages[0].status : null;
 
-      if (!textRes.ok || (msgStatus && (msgStatus.name === "REJECTED_NO_SESSION" || msgStatus.id === 7010))) {
-        sentVia = "template";
-        await fetch(\`\${baseUrl}/whatsapp/1/message/template\`, {
-          method: "POST",
-          headers: {
-            "Authorization": \`App \${apiKey}\`,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
+      if (!textRes.ok || (msgStatus && (msgStatus.name === 'REJECTED_NO_SESSION' || msgStatus.id === 7010))) {
+        sentVia = 'template';
+        await fetch(baseUrl + '/whatsapp/1/message/template', {
+          method: 'POST',
+          headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify({
             messages: [{
-              from: sender,
-              to: target,
+              from: sender, to: target,
               content: {
-                templateName: "order_confirmation",
+                templateName: 'order_confirmation',
                 templateData: { body: { placeholders: [String(order.id), templatePlaceholder] } },
-                language: "en"
+                language: 'en'
               }
             }]
           })
         });
       }
     } catch (e) {
-      console.error("[driver_scan] Dispatch error:", e);
+      console.error('[driver_scan] Dispatch error:', e);
     }
 
     res.json({ success: true, orderId: order.id, driverPhone: target, sentVia });
@@ -937,6 +926,7 @@ app.post('/api/driver/scan', async (req, res) => {
     client.release();
   }
 });
+
 
 // Handle wildcard routing for frontend pages
 app.get('*', (req, res) => {
