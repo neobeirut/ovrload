@@ -434,8 +434,8 @@ app.post('/api/calculate-delivery', async (req, res) => {
       'SELECT location FROM branches WHERE id = 1 LIMIT 1'
     );
 
-    let branchLat = 33.876503; // Default Badaro coordinates
-    let branchLng = 35.517279;
+    let branchLat = 33.876514; // Default Badaro coordinates (OVR LOAD Cloud Kitchen)
+    let branchLng = 35.517225;
 
     if (branchRes.rows.length > 0 && branchRes.rows[0].location) {
       const coords = branchRes.rows[0].location.match(/(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/);
@@ -768,7 +768,7 @@ app.post('/api/orders/save', async (req, res) => {
         total || 0,                  // total_amount
         'pending',                   // status
         specialInstructions,         // special_instructions
-        lat && lng ? String(haversineDistanceKm(33.876503, 35.517279, lat, lng).toFixed(2)) : null,
+        lat && lng ? String(haversineDistanceKm(33.876514, 35.517225, lat, lng).toFixed(2)) : null,
         deliveryFee || 0,            // delivery_cost_at_order
         customerName || null,        // customer_name
         customerPhone || null        // customer_phone
