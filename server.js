@@ -1081,80 +1081,73 @@ app.post('/api/orders/save', async (req, res) => {
   }
 });
 
-// GET /driver/scan — Driver Scan Landing Page
+// GET /driver/scan - Driver Scan Landing Page
 app.get('/driver/scan', (req, res) => {
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OVR LOAD — Driver Order Dispatch</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #121212; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-    .card { background: #1e1e1e; border: 1px solid #333; border-radius: 16px; padding: 24px; max-width: 400px; width: 100%; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-    h2 { margin-top: 0; color: #ff5722; font-size: 1.5rem; }
-    p { color: #bbb; font-size: 0.95rem; line-height: 1.5; }
-    input { width: 100%; padding: 14px; margin: 16px 0; border-radius: 10px; border: 1px solid #444; background: #2a2a2a; color: #fff; font-size: 1rem; box-sizing: border-box; text-align: center; }
-    button { width: 100%; padding: 14px; background: #25d366; color: #fff; font-weight: bold; font-size: 1rem; border: none; border-radius: 10px; cursor: pointer; transition: background 0.2s; }
-    button:hover { background: #1ebd59; }
-    .status { margin-top: 16px; font-weight: bold; color: #4caf50; font-size: 1.1rem; }
-    .hidden { display: none; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h2>🛵 Delivery Order #<span id="orderIdText">...</span></h2>
-    <p>Scan confirmed! Enter your phone number once to receive complete order details & Google Maps PIN directly on WhatsApp.</p>
-    
-    <div id="formSection">
-      <input type="tel" id="driverPhoneInput" placeholder="Enter your phone number (e.g. 70123456)" />
-      <button onclick="dispatchToDriver()">Send to my WhatsApp</button>
-    </div>
-
-    <div id="statusSection" class="hidden">
-      <p class="status">✅ Order Dispatched to Your WhatsApp!</p>
-      <p style="font-size: 0.85rem; color: #888;">Check your WhatsApp inbox for customer phone number, delivery address & map pin.</p>
-    </div>
-  </div>
-
-  <script>
-    const urlParams = new URLSearchParams(window.location.search);
-    const orderId = urlParams.get('orderId') || urlParams.get('id');
-    document.getElementById('orderIdText').textContent = orderId || 'N/A';
-
-    const savedPhone = localStorage.getItem('ovrload_driver_phone');
-    if (savedPhone) {
-      document.getElementById('driverPhoneInput').value = savedPhone;
-      if (orderId) {
-        dispatchToDriver(savedPhone);
-      }
-    }
-
-    async function dispatchToDriver(phoneOverride) {
-      const phone = phoneOverride || document.getElementById('driverPhoneInput').value.trim();
-      if (!phone) {
-        alert('Please enter your phone number.');
-        return;
-      }
-
-      localStorage.setItem('ovrload_driver_phone', phone);
-      document.getElementById('formSection').classList.add('hidden');
-      document.getElementById('statusSection').classList.remove('hidden');
-
-      try {
-        await fetch('/api/driver/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId, driverPhone: phone })
-        });
-      } catch (e) {
-        console.error(e);
-      }
-    }
-  </script>
-</body>
-</html>`;
-  res.send(html);
+  const lines = [
+    '<!DOCTYPE html><html lang="en"><head>',
+    '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">',
+    '<title>OVR LOAD - Driver Dispatch</title>',
+    '<style>',
+    '* { box-sizing:border-box; margin:0; padding:0; }',
+    'body { font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#0a0a0a; color:#fff; display:flex; justify-content:center; align-items:center; min-height:100vh; padding:20px; }',
+    '.card { background:#161616; border:1px solid #2a2a2a; border-radius:20px; padding:28px 24px; max-width:380px; width:100%; text-align:center; }',
+    '.logo { font-size:1rem; font-weight:800; margin-bottom:20px; } .logo span { color:#e66e19; }',
+    'h2 { color:#fff; font-size:1.2rem; margin-bottom:8px; }',
+    '.oid { color:#e66e19; font-size:1.6rem; font-weight:800; margin-bottom:16px; }',
+    'p { color:#8e8e93; font-size:0.88rem; line-height:1.6; margin-bottom:20px; }',
+    'input { width:100%; padding:14px; border-radius:12px; border:1px solid #333; background:#1e1e1e; color:#fff; font-size:1.1rem; text-align:center; outline:none; }',
+    'input:focus { border-color:#e66e19; }',
+    '.btn { width:100%; padding:15px; background:#25d366; color:#fff; font-weight:700; font-size:1rem; border:none; border-radius:12px; cursor:pointer; margin-top:12px; }',
+    '.btn:disabled { opacity:0.6; }',
+    '.err { color:#ff4a4a; font-size:0.82rem; margin-top:8px; display:none; }',
+    '.spinner { width:44px; height:44px; border:3px solid #333; border-top-color:#25d366; border-radius:50%; animation:spin 0.8s linear infinite; margin:0 auto 16px; }',
+    '@keyframes spin { to { transform:rotate(360deg); } }',
+    '.sub { color:#5e5e62; font-size:0.82rem; margin-bottom:20px; }',
+    '.chg { color:#e66e19; font-size:0.82rem; cursor:pointer; background:none; border:none; text-decoration:underline; font-family:inherit; }',
+    '.ok-icon { font-size:3rem; margin-bottom:12px; }',
+    '.ok-title { font-size:1.2rem; font-weight:700; color:#25d366; margin-bottom:8px; }',
+    '[data-s] { display:none; } [data-s].on { display:block; }',
+    '</style></head><body>',
+    '<div class="card">',
+    '<div class="logo"><span>OVR</span>LOAD</div>',
+    '<div data-s="form" class="on">',
+    '<h2>&#x1F6F5; Delivery Order</h2>',
+    '<div class="oid">#<span id="o1"></span></div>',
+    '<p>Enter your number once to receive delivery details on WhatsApp automatically every time.</p>',
+    '<input type="tel" id="ph" placeholder="e.g. 70 123 456" inputmode="tel" />',
+    '<div class="err" id="er">Please enter a valid phone number.</div>',
+    '<button class="btn" id="sb" onclick="send()">&#x1F4F2; Send to my WhatsApp</button>',
+    '</div>',
+    '<div data-s="auto">',
+    '<div class="spinner"></div>',
+    '<h2>&#x1F6F5; Delivery Order</h2>',
+    '<div class="oid">#<span id="o2"></span></div>',
+    '<div id="an" style="font-weight:700;margin-bottom:6px;"></div>',
+    '<div class="sub">Sending order details to your WhatsApp...</div>',
+    '<button class="chg" onclick="chg()">Not you? Change number</button>',
+    '</div>',
+    '<div data-s="done">',
+    '<div class="ok-icon">&#x2705;</div>',
+    '<h2>&#x1F6F5; Delivery Order</h2>',
+    '<div class="oid">#<span id="o3"></span></div>',
+    '<div class="ok-title">Sent to WhatsApp!</div>',
+    '<p>Check WhatsApp for address and delivery details.</p>',
+    '</div>',
+    '</div>',
+    '<script>',
+    'var p=new URLSearchParams(location.search),oid=p.get("orderId")||p.get("id")||"?";',
+    'document.getElementById("o1").textContent=oid;',
+    'document.getElementById("o2").textContent=oid;',
+    'document.getElementById("o3").textContent=oid;',
+    'function show(n){document.querySelectorAll("[data-s]").forEach(function(e){e.classList.remove("on")});document.querySelector("[data-s="+n+"]").classList.add("on")}',
+    'var KEY="ovrload_driver_phone",sv=localStorage.getItem(KEY);',
+    'if(sv&&oid!="?"){document.getElementById("an").textContent=sv;show("auto");go(sv);}',
+    'function chg(){localStorage.removeItem(KEY);show("form");}',
+    'function send(){var v=document.getElementById("ph").value.trim();if(!v||v.length<5){document.getElementById("er").style.display="block";return;}document.getElementById("er").style.display="none";document.getElementById("sb").disabled=true;document.getElementById("sb").textContent="Sending...";localStorage.setItem(KEY,v);go(v);}',
+    'function go(phone){fetch("/api/driver/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:oid,driverPhone:phone})}).catch(function(){}).finally(function(){show("done");});}',
+    '</script></body></html>'
+  ];
+  res.send(lines.join('\n'));
 });
 
 // POST /api/driver/scan — Dispatch order details to driver's WhatsApp via Infobip
