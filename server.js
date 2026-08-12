@@ -24,6 +24,7 @@ if (fs.existsSync(envPath)) {
 }
 
 const app = express();
+app.set('case sensitive routing', false);
 const PORT = process.env.PORT || 3000;
 
 const SUPABASE_DB_URL = "postgresql://postgres.nigtjaiwnmjdnmjtdlof:FsDdHJhoYDv1GsxW@aws-1-ap-south-1.pooler.supabase.com:6543/postgres";
