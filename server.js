@@ -417,6 +417,24 @@ function haversineDistanceKm(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Helper: get real road distance via OSRM (falls back to Haversine)
+async function getRoadDistanceKm(lat1, lon1, lat2, lon2) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    const data = await res.json();
+    if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+      return data.routes[0].distance / 1000; // metres → km
+    }
+  } catch (e) {
+    console.warn('OSRM unavailable, falling back to Haversine:', e.message);
+  }
+  return haversineDistanceKm(lat1, lon1, lat2, lon2);
+}
+
 // POST /api/calculate-delivery
 app.post('/api/calculate-delivery', async (req, res) => {
   try {
@@ -445,18 +463,18 @@ app.post('/api/calculate-delivery', async (req, res) => {
       }
     }
 
-    // Calculate distance
-    const distanceKm = haversineDistanceKm(lat, lng, branchLat, branchLng);
+    // Calculate real road distance (OSRM) — falls back to Haversine
+    const distanceKm = await getRoadDistanceKm(lat, lng, branchLat, branchLng);
 
-    // Find active pricing rule
+    // Find active pricing rule — most specific match (highest min wins)
     const ruleRes = await pool.query(
       `SELECT id, delivery_cost, min_distance_km, max_distance_km 
        FROM delivery_pricing_rules 
        WHERE is_active = true 
          AND (branch_id = 1 OR branch_id IS NULL)
-         AND min_distance_km <= $1 
-         AND max_distance_km >= $1
-       ORDER BY branch_id NULLS LAST, display_order ASC, id ASC
+         AND min_distance_km::float <= $1 
+         AND max_distance_km::float > $1
+       ORDER BY min_distance_km::float DESC
        LIMIT 1`,
       [distanceKm]
     );
@@ -768,7 +786,7 @@ app.post('/api/orders/save', async (req, res) => {
         total || 0,                  // total_amount
         'pending',                   // status
         specialInstructions,         // special_instructions
-        lat && lng ? String(haversineDistanceKm(33.876514, 35.517225, lat, lng).toFixed(2)) : null,
+        lat && lng ? String((await getRoadDistanceKm(33.876514, 35.517225, lat, lng)).toFixed(2)) : null,
         deliveryFee || 0,            // delivery_cost_at_order
         customerName || null,        // customer_name
         customerPhone || null        // customer_phone
