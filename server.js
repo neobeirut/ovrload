@@ -529,6 +529,7 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
       SELECT
         o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
         o.created_at, o.customer_name, o.customer_phone,
+        o.order_source, o.payment_method,
         json_agg(json_build_object(
           'quantity', oi.quantity,
           'product_name', p.name,

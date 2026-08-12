@@ -44,6 +44,11 @@
     .badge-completed { background: rgba(230,110,25,0.15); color: var(--primary);border: 1px solid rgba(230,110,25,0.25); }
     .order-name  { font-size: 0.92rem; color: var(--text2); margin-bottom: 2px; }
     .order-addr  { font-size: 0.78rem; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .order-meta  { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.35rem; flex-wrap: wrap; }
+    .origin-pill { font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em; background: rgba(230,110,25,0.12); color: var(--primary); border: 1px solid rgba(230,110,25,0.25); }
+    .pay-pill    { font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .pay-cash    { background: rgba(37,211,102,0.12); color: var(--green);  border: 1px solid rgba(37,211,102,0.25); }
+    .pay-whish   { background: rgba(129,140,248,0.12); color: #818cf8;      border: 1px solid rgba(129,140,248,0.25); }
     .order-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 0.55rem; }
     .order-items-preview { font-size: 0.75rem; color: var(--text3); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 0.75rem; }
     .order-total { font-size: 0.95rem; font-weight: 700; color: var(--text); white-space: nowrap; }
@@ -108,6 +113,10 @@
       <div class="modal-order-id" id="m-order-id">Order #&mdash;</div>
       <div class="modal-customer" id="m-customer"></div>
       <div class="modal-address"  id="m-address"></div>
+      <div style="display:flex;align-items:center;gap:0.5rem;justify-content:center;margin-bottom:0.75rem;flex-wrap:wrap;">
+        <span class="origin-pill" id="m-origin" style="display:none"></span>
+        <span class="pay-pill"    id="m-payment" style="display:none"></span>
+      </div>
       <div class="qr-wrap"><div id="qr-canvas"></div></div>
       <div class="qr-hint">&#x1F4F7; Scan with camera &mdash; or enter your number below</div>
       <div class="or-divider"><span>&mdash; or enter your number &mdash;</span></div>
@@ -216,14 +225,34 @@
       wrap.innerHTML = html;
     }
 
+    var SHOW_PAYMENT_FOR = ['whatsapp', 'app', 'in-store'];
+
+    function originEmoji(src) {
+      var s = (src || '').toLowerCase();
+      if (s === 'whatsapp') return '&#x1F4AC; ';
+      if (s === 'app')      return '&#x1F4F1; ';
+      if (s === 'toters')   return '&#x1F6B2; ';
+      if (s === 'noknok')   return '&#x1F6AA; ';
+      return '&#x1F3EA; ';
+    }
+
     function cardHTML(o) {
-      var name  = (o.customer_name || 'Customer').trim();
-      var addr  = cleanAddr(o.delivery_address);
-      var items = (o.items || []).filter(function(i) { return i && i.product_name; }).map(function(i) { return i.quantity + 'x ' + i.product_name; }).join(' - ') || '-';
+      var name   = (o.customer_name || 'Customer').trim();
+      var addr   = cleanAddr(o.delivery_address);
+      var items  = (o.items || []).filter(function(i) { return i && i.product_name; }).map(function(i) { return i.quantity + 'x ' + i.product_name; }).join(' - ') || '-';
       var badges = { pending:'badge-pending', confirmed:'badge-confirmed', ready:'badge-ready', completed:'badge-completed' };
       var labels = { pending:'Pending', confirmed:'Confirmed', ready:'Ready', completed:'Ready' };
-      var badge = badges[o.status] || 'badge-completed';
-      var label = labels[o.status] || o.status;
+      var badge  = badges[o.status] || 'badge-completed';
+      var label  = labels[o.status] || o.status;
+      var origin = o.order_source || 'In-Store';
+      var showPay = SHOW_PAYMENT_FOR.indexOf(origin.toLowerCase()) >= 0;
+      var payMethod = o.payment_method || '';
+      var payClass  = payMethod.toLowerCase() === 'whish' ? 'pay-whish' : 'pay-cash';
+      var payLabel  = payMethod || 'Cash';
+      var metaHtml  = '<div class="order-meta">' +
+        '<span class="origin-pill">' + originEmoji(origin) + esc(origin) + '</span>' +
+        (showPay ? '<span class="pay-pill ' + payClass + '">&#x1F4B0; ' + esc(payLabel) + '</span>' : '') +
+        '</div>';
       return '<div class="order-card" onclick="openQR(' + o.id + ')">' +
         '<div class="order-card-top">' +
           '<span class="order-id">#' + o.id + '</span>' +
@@ -234,6 +263,7 @@
         '</div>' +
         '<div class="order-name">&#x1F464; ' + esc(name) + '</div>' +
         (addr ? '<div class="order-addr">&#x1F4CD; ' + esc(addr) + '</div>' : '') +
+        metaHtml +
         '<div class="order-bottom">' +
           '<span class="order-items-preview">&#x1F6D2; ' + esc(items) + '</span>' +
           '<span class="order-total">$' + Number(o.total_amount || 0).toFixed(2) + '</span>' +
@@ -249,10 +279,26 @@
 
       var name = (order.customer_name || 'Customer').trim();
       var addr = cleanAddr(order.delivery_address);
+      var origin = order.order_source || 'In-Store';
+      var payMethod = order.payment_method || 'Cash';
+      var showPay = SHOW_PAYMENT_FOR.indexOf(origin.toLowerCase()) >= 0;
 
       document.getElementById('m-order-id').textContent = 'Order #' + orderId;
       document.getElementById('m-customer').textContent = (order.customer_phone ? order.customer_phone + '  -  ' : '') + name;
       document.getElementById('m-address').textContent  = addr ? addr : '';
+
+      var mOrigin = document.getElementById('m-origin');
+      mOrigin.innerHTML = originEmoji(origin) + esc(origin);
+      mOrigin.style.display = 'inline-block';
+
+      var mPay = document.getElementById('m-payment');
+      if (showPay) {
+        mPay.innerHTML = '&#x1F4B0; ' + esc(payMethod || 'Cash');
+        mPay.className = 'pay-pill ' + (payMethod.toLowerCase() === 'whish' ? 'pay-whish' : 'pay-cash');
+        mPay.style.display = 'inline-block';
+      } else {
+        mPay.style.display = 'none';
+      }
 
       var canvas = document.getElementById('qr-canvas');
       canvas.innerHTML = '';
