@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -939,8 +939,8 @@ app.post('/api/driver/scan', async (req, res) => {
             from: sender,
             to: target,
             content: {
-              templateName: 'order_confirmation',
-              templateData: { body: { placeholders: [String(order.id), driverText] } },
+              templateName: 'order_to_driver',
+              templateData: { body: { placeholders: [driverText] } },
               language: 'en'
             }
           }]
