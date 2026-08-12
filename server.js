@@ -442,8 +442,8 @@ app.get('/api/orders/pending-delivery', requireAuth, async (req, res) => {
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p    ON p.id = oi.product_id
-      WHERE o.order_type ILIKE 'delivery'
-        AND o.status IN ('pending', 'confirmed', 'ready')
+      WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
+        AND o.status IN ('pending', 'confirmed', 'ready', 'completed')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
       GROUP BY o.id
       ORDER BY o.created_at DESC
