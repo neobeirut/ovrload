@@ -752,14 +752,15 @@ app.post('/api/orders/save', async (req, res) => {
     // Insert order with dedicated customer name & phone columns
     const orderResult = await client.query(
       `INSERT INTO orders
-        (branch_id, order_type, delivery_address, subtotal_amount, delivery_fee, discount_amount,
+        (branch_id, order_type, order_source, delivery_address, subtotal_amount, delivery_fee, discount_amount,
          total_amount, status, special_instructions, delivery_distance_km, delivery_cost_at_order,
          customer_name, customer_phone, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
        RETURNING id`,
       [
         1,                           // branch_id (Ovrload single branch)
         orderType || 'delivery',     // order_type
+        'WhatsApp',                  // order_source
         deliveryAddress || '',       // delivery_address
         subtotal || 0,               // subtotal_amount
         deliveryFee || 0,            // delivery_fee
