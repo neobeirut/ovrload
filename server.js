@@ -855,11 +855,12 @@ app.get('/driver/scan', (req, res) => {
     '<button class="chg" onclick="chg()">Not you? Change number</button>',
     '</div>',
     '<div data-s="done">',
-    '<div class="ok-icon">&#x2705;</div>',
+    '<div class="ok-icon" id="done-icon">&#x2705;</div>',
     '<h2>&#x1F6F5; Delivery Order</h2>',
     '<div class="oid">#<span id="o3"></span></div>',
-    '<div class="ok-title">Sent to WhatsApp!</div>',
-    '<p>Check WhatsApp for address and delivery details.</p>',
+    '<div class="ok-title" id="done-title">Sent to WhatsApp!</div>',
+    '<p id="done-msg">Check WhatsApp for address and delivery details.</p>',
+    '<div id="order-details" style="text-align:left;background:#1e1e1e;border-radius:12px;padding:16px;margin-top:12px;font-size:0.88rem;line-height:1.9;display:none;"></div>',
     '</div>',
     '</div>',
     '<script>',
@@ -872,7 +873,7 @@ app.get('/driver/scan', (req, res) => {
     'if(sv&&oid!="?"){document.getElementById("an").textContent=sv;show("auto");go(sv);}',
     'function chg(){localStorage.removeItem(KEY);show("form");}',
     'function send(){var v=document.getElementById("ph").value.trim();if(!v||v.length<5){document.getElementById("er").style.display="block";return;}document.getElementById("er").style.display="none";document.getElementById("sb").disabled=true;document.getElementById("sb").textContent="Sending...";localStorage.setItem(KEY,v);go(v);}',
-    'function go(phone){fetch("/api/driver/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:oid,driverPhone:phone})}).then(function(r){return r.json();}).then(function(d){if(d.waUrl){window.open(d.waUrl,"_blank");}show("done");}).catch(function(){show("done");});}',
+    'function go(phone){fetch("/api/driver/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:oid,driverPhone:phone})}).then(function(r){return r.json();}).then(function(d){show("done");if(d.sentVia){document.getElementById("done-icon").textContent="\u2705";document.getElementById("done-title").textContent="Sent to WhatsApp!";document.getElementById("done-msg").textContent="Check WhatsApp for your delivery details."}else{document.getElementById("done-icon").textContent="\uD83D\uDCCB";document.getElementById("done-title").textContent="Delivery Details";document.getElementById("done-msg").textContent="";if(d.orderDetails){var od=d.orderDetails;var el=document.getElementById("order-details");el.style.display="block";el.innerHTML="<b>Order #"+od.id+"</b><br>Customer: "+od.customerName+"<br>Phone: "+od.customerPhone+"<br>Address: "+od.address+"<br><br><b>Items:</b><br>"+od.items+"<br><br><b>Collect: $"+od.total+"</b>"}}}).catch(function(){show("done");});}',
     '</script></body></html>'
   ];
   res.send(lines.join('\n'));
@@ -930,7 +931,7 @@ app.post('/api/driver/scan', async (req, res) => {
 
     let sentVia = null;
     try {
-      // Try template first (works without active session)
+      // Template message — works without an active session
       const tplRes = await fetch(baseUrl + '/whatsapp/1/message/template', {
         method: 'POST',
         headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -948,24 +949,31 @@ app.post('/api/driver/scan', async (req, res) => {
       });
       const tplData = await tplRes.json().catch(() => ({}));
       const tplStatus = tplData && tplData.messages && tplData.messages[0] ? tplData.messages[0].status : null;
-      console.log('[driver_scan] Template result:', tplRes.status, tplStatus && tplStatus.name);
-
+      console.log('[driver_scan] Template result:', tplRes.status, JSON.stringify(tplStatus));
       if (tplRes.ok && tplStatus && tplStatus.groupId !== 2) {
         sentVia = 'template';
       } else {
-        // Template failed — try plain text (needs active session, may fail with 7010)
-        await fetch(baseUrl + '/whatsapp/1/message/text', {
-          method: 'POST',
-          headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ from: sender, to: target, content: { text: driverText } })
-        });
-        sentVia = 'text';
+        console.log('[driver_scan] Template failed, no text fallback. groupId:', tplStatus && tplStatus.groupId, 'name:', tplStatus && tplStatus.name);
       }
     } catch (e) {
       console.error('[driver_scan] Infobip error:', e.message);
     }
 
-    res.json({ success: true, orderId: order.id, sentVia, waUrl });
+    // Return order details so scan page can display them if WhatsApp wasn't sent
+    res.json({
+      success: true,
+      orderId: order.id,
+      sentVia,
+      waUrl,
+      orderDetails: {
+        id: order.id,
+        customerName: order.customer_name || '-',
+        customerPhone: order.customer_phone || 'N/A',
+        address: cleanAddr,
+        items: items.map(i => i.quantity + 'x ' + (i.product_name || 'Item')).join(', '),
+        total: Number(order.total_amount || 0).toFixed(2)
+      }
+    });
   } catch (err) {
     console.error('Error dispatching to driver:', err);
     res.status(500).json({ error: 'Failed to dispatch.' });
