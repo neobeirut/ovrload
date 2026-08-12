@@ -433,21 +433,19 @@ app.get('/api/orders/pending-delivery', requireAuth, async (req, res) => {
     const result = await client.query(`
       SELECT
         o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
-        o.created_at, o.latitude, o.longitude,
-        u.name AS customer_name, u.phone AS customer_phone,
+        o.created_at, o.customer_name, o.customer_phone,
         json_agg(json_build_object(
           'quantity', oi.quantity,
           'product_name', p.name,
           'total_price', oi.total_price
         ) ORDER BY oi.id) AS items
       FROM orders o
-      LEFT JOIN auth_users u  ON o.user_id = u.id
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p    ON p.id = oi.product_id
       WHERE o.order_type ILIKE 'delivery'
         AND o.status IN ('pending', 'confirmed', 'ready')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
-      GROUP BY o.id, u.name, u.phone
+      GROUP BY o.id
       ORDER BY o.created_at DESC
     `);
     res.json(result.rows);
@@ -463,12 +461,10 @@ app.get('/api/orders/pending-delivery', requireAuth, async (req, res) => {
 app.get('/api/orders/:id', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
-    const result = await client.query(`
-      SELECT o.*, u.name AS customer_name, u.phone AS customer_phone
-      FROM orders o
-      LEFT JOIN auth_users u ON o.user_id = u.id
-      WHERE o.id = $1 LIMIT 1
-    `, [Number(req.params.id)]);
+    const result = await client.query(
+      `SELECT * FROM orders WHERE id = $1 LIMIT 1`,
+      [Number(req.params.id)]
+    );
     if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -489,7 +485,7 @@ app.patch('/api/orders/:id/status', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
     const result = await client.query(
-      `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id, status`,
+      `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status`,
       [status, Number(req.params.id)]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
@@ -841,10 +837,7 @@ app.post('/api/driver/scan', async (req, res) => {
   const client = await pool.connect();
   try {
     const orderRes = await client.query(
-      \`SELECT o.*, u.name as customer_name, u.phone as customer_phone
-       FROM orders o
-       LEFT JOIN auth_users u ON o.user_id = u.id
-       WHERE o.id = $1 LIMIT 1\`,
+      `SELECT * FROM orders WHERE id = $1 LIMIT 1`,
       [Number(orderId)]
     );
 
@@ -871,7 +864,7 @@ app.post('/api/driver/scan', async (req, res) => {
       .join('  ');
 
     const cleanAddr = String(order.delivery_address || 'Pickup / Not specified').replace(/\[Maps Pin:.*?\]/gi, '').replace(/[\\r\\n]+/g, ' ').trim();
-    const gpsLink = (order.latitude && order.longitude) ? \`https://maps.google.com/?q=\${order.latitude},\${order.longitude}\` : null;
+    const gpsLink = null; // GPS coordinates not stored in orders table
 
     let driverText = \`🛵 *DELIVERY ORDER ASSIGNMENT - OVR LOAD*\\r\\n\`;
     driverText += \`================================\\r\\n\\r\\n\`;
