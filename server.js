@@ -1210,31 +1210,23 @@ app.post('/api/driver/scan', async (req, res) => {
     if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
     if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
 
-    let sentVia = 'text';
+    // Always send template first - no prior WhatsApp session needed
+    let sentVia = 'template';
     try {
-      const textRes = await fetch(baseUrl + '/whatsapp/1/message/text', {
+      const tplRes = await fetch(baseUrl + '/whatsapp/1/message/template', {
         method: 'POST',
         headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ from: sender, to: target, content: { text: driverText } })
+        body: JSON.stringify({ messages: [{ from: sender, to: target, content: { templateName: 'order_confirmation', templateData: { body: { placeholders: [String(order.id), templatePlaceholder] } }, language: 'en' } }] })
       });
-      const textData = await textRes.json().catch(() => ({}));
-      const msgStatus = textData && textData.messages && textData.messages[0] ? textData.messages[0].status : null;
-
-      if (!textRes.ok || (msgStatus && (msgStatus.name === 'REJECTED_NO_SESSION' || msgStatus.id === 7010))) {
-        sentVia = 'template';
-        await fetch(baseUrl + '/whatsapp/1/message/template', {
+      const tplData = await tplRes.json().catch(() => ({}));
+      const tplStatus = tplData && tplData.messages && tplData.messages[0] ? tplData.messages[0].status : null;
+      console.log('[driver_scan] Template result:', tplRes.status, tplStatus && tplStatus.name);
+      if (!tplRes.ok || (tplStatus && tplStatus.groupId === 2)) {
+        sentVia = 'text_fallback';
+        await fetch(baseUrl + '/whatsapp/1/message/text', {
           method: 'POST',
           headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({
-            messages: [{
-              from: sender, to: target,
-              content: {
-                templateName: 'order_confirmation',
-                templateData: { body: { placeholders: [String(order.id), templatePlaceholder] } },
-                language: 'en'
-              }
-            }]
-          })
+          body: JSON.stringify({ from: sender, to: target, content: { text: driverText } })
         });
       }
     } catch (e) {
