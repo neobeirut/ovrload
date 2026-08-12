@@ -245,8 +245,8 @@ app.get('/driver', (req, res) => {
         return;
       }
 
-      const active   = orders.filter(o => ['pending','confirmed','ready'].includes(o.status));
-      const recent   = orders.filter(o => !['pending','confirmed','ready'].includes(o.status));
+      const active   = orders.filter(o => ['pending','confirmed','ready','completed'].includes(o.status));
+      const recent   = orders.filter(o => !['pending','confirmed','ready','completed'].includes(o.status));
 
       let html = '';
       if (active.length) {
@@ -254,7 +254,7 @@ app.get('/driver', (req, res) => {
         html += active.map(cardHTML).join('');
       }
       if (recent.length) {
-        html += '<div class="section-title" style="margin-top:1.25rem">Recently Completed</div>';
+        html += '<div class="section-title" style="margin-top:1.25rem">Other</div>';
         html += recent.map(cardHTML).join('');
       }
       wrap.innerHTML = html;
@@ -774,7 +774,7 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p    ON p.id = oi.product_id
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
-        AND o.status NOT IN ('cancelled', 'completed', 'delivered')
+        AND o.status NOT IN ('cancelled', 'delivered')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
       GROUP BY o.id
       ORDER BY o.created_at DESC
