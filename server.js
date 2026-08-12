@@ -906,18 +906,27 @@ app.post('/api/driver/scan', async (req, res) => {
     const cleanAddr = String(order.delivery_address || 'Pickup')
       .replace(/\[Maps Pin:[^\]]*\]/gi, '').replace(/[\r\n]+/g, ' ').trim() || 'Pickup';
 
+    // Extract Maps Pin URL if present
+    const mapsMatch = String(order.delivery_address || '').match(/\[Maps Pin:\s*(https?:\/\/[^\]]+)\]/i);
+    const mapsUrl = mapsMatch ? mapsMatch[1].trim() : null;
+
     // Infobip placeholders cannot contain newlines — use single-line compact format
     const itemsSingle = items
       .map(i => i.quantity + 'x ' + (i.product_name || 'Item'))
       .join(', ');
+
+    const deliveryFee = Number(order.delivery_fee || order.delivery_cost_at_order || 0);
 
     const driverText = '🛵 OVR LOAD DELIVERY'
       + ' | Order #' + order.id
       + ' | ' + (order.customer_name || '-')
       + ' | ' + (order.customer_phone || 'N/A')
       + ' | ' + cleanAddr
+      + (mapsUrl ? ' | 📍 ' + mapsUrl : '')
       + ' | ' + itemsSingle
+      + (deliveryFee > 0 ? ' | Delivery: $' + deliveryFee.toFixed(2) : '')
       + ' | Collect: $' + Number(order.total_amount || 0).toFixed(2);
+
 
     // Normalize phone
     let target = String(phoneNum).replace(/\D/g, '');
