@@ -1216,7 +1216,7 @@ app.post('/api/driver/scan', async (req, res) => {
       const tplRes = await fetch(baseUrl + '/whatsapp/1/message/template', {
         method: 'POST',
         headers: { 'Authorization': 'App ' + apiKey, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ messages: [{ from: sender, to: target, content: { templateName: 'order_confirmation', templateData: { body: { placeholders: [String(order.id), templatePlaceholder] } }, language: 'en' } }] })
+        body: JSON.stringify({ messages: [{ from: sender, to: target, content: { templateName: 'order_confirmation', templateData: { body: { placeholders: [String(order.id), driverText] } }, language: 'en' } }] })
       });
       const tplData = await tplRes.json().catch(() => ({}));
       const tplStatus = tplData && tplData.messages && tplData.messages[0] ? tplData.messages[0].status : null;
