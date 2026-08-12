@@ -42,7 +42,336 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── Driver PWA ────────────────────────────────────────────────
+// Manifest for PWA installability
+app.get('/driver-manifest.json', (req, res) => {
+  res.json({
+    name: 'OVR LOAD — Driver',
+    short_name: 'Driver',
+    description: 'OVR LOAD Driver Dispatch App',
+    start_url: '/driver',
+    display: 'standalone',
+    background_color: '#0a0a0a',
+    theme_color: '#e66e19',
+    orientation: 'portrait',
+    icons: [
+      { src: '/img/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/img/icon-512.png', sizes: '512x512', type: 'image/png' }
+    ]
+  });
+});
+
+// Driver PWA — full page
+app.get('/driver', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Driver">
+  <meta name="theme-color" content="#e66e19">
+  <title>OVR LOAD — Driver</title>
+  <link rel="manifest" href="/driver-manifest.json">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    :root {
+      --bg: #0a0a0a; --surface: #141414; --surface2: #1e1e1e;
+      --border: rgba(255,255,255,0.08); --primary: #e66e19;
+      --primary-h: #ff802b; --text: #fff; --text2: #8e8e93; --text3: #5e5e62;
+      --green: #25d366; --yellow: #ffc107; --blue: #42a5f5;
+    }
+    html, body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Outfit', BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; height: 100%; overflow: hidden; }
+    /* Header */
+    .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0.9rem 1.25rem; display: flex; align-items: center; justify-content: space-between; position: fixed; top: 0; left: 0; right: 0; z-index: 100; }
+    .header-brand { display: flex; align-items: center; gap: 0.5rem; }
+    .header-brand .ovr { color: var(--primary); font-weight: 800; font-size: 1.2rem; letter-spacing: -0.5px; }
+    .header-brand .sep { color: var(--text3); font-size: 1rem; }
+    .header-brand .label { color: var(--text2); font-weight: 600; font-size: 0.85rem; }
+    .header-right { display: flex; align-items: center; gap: 0.75rem; }
+    .refresh-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 0.4rem 0.85rem; border-radius: 8px; font-size: 0.8rem; cursor: pointer; transition: all 0.15s; }
+    .refresh-btn:active { background: var(--primary); color: #fff; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    /* Order list */
+    .list-wrap { position: fixed; top: 57px; bottom: 0; left: 0; right: 0; overflow-y: auto; padding: 1rem; }
+    .section-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin: 0.5rem 0 0.6rem; padding: 0 0.25rem; }
+    .order-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1rem 1.1rem; margin-bottom: 0.75rem; cursor: pointer; transition: border-color 0.15s, transform 0.1s; active:transform:scale(0.98); user-select: none; }
+    .order-card:active { transform: scale(0.98); border-color: var(--primary); }
+    .order-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
+    .order-id { font-size: 1rem; font-weight: 700; color: var(--primary); }
+    .order-badge { font-size: 0.68rem; font-weight: 700; padding: 3px 9px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .badge-pending  { background: rgba(255,193,7,0.15);  color: var(--yellow); border: 1px solid rgba(255,193,7,0.25); }
+    .badge-confirmed{ background: rgba(66,165,245,0.15); color: var(--blue);   border: 1px solid rgba(66,165,245,0.25); }
+    .badge-ready    { background: rgba(37,211,102,0.15); color: var(--green);  border: 1px solid rgba(37,211,102,0.25); }
+    .badge-completed{ background: rgba(255,255,255,0.06); color: var(--text3); border: 1px solid var(--border); }
+    .order-name { font-size: 0.92rem; color: var(--text2); margin-bottom: 2px; }
+    .order-addr { font-size: 0.78rem; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .order-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 0.55rem; }
+    .order-items-preview { font-size: 0.75rem; color: var(--text3); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 0.75rem; }
+    .order-total { font-size: 0.95rem; font-weight: 700; color: var(--text); white-space: nowrap; }
+    .order-time { font-size: 0.7rem; color: var(--text3); margin-left: 0.5rem; }
+    /* Empty state */
+    .empty { text-align: center; padding: 5rem 2rem; }
+    .empty-icon { font-size: 3.5rem; margin-bottom: 1rem; }
+    .empty-title { color: var(--text2); font-size: 1rem; margin-bottom: 0.4rem; }
+    .empty-sub { color: var(--text3); font-size: 0.82rem; }
+    /* QR Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 999; align-items: center; justify-content: center; padding: 1.5rem; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: #161616; border: 1px solid #2a2a2a; border-radius: 24px; padding: 1.75rem 1.5rem 1.5rem; max-width: 380px; width: 100%; text-align: center; box-shadow: 0 24px 80px rgba(0,0,0,0.8); }
+    .modal-order-id { font-size: 1.3rem; font-weight: 800; color: var(--primary); margin-bottom: 0.2rem; }
+    .modal-customer { font-size: 0.88rem; color: var(--text2); margin-bottom: 0.2rem; }
+    .modal-address { font-size: 0.78rem; color: var(--text3); margin-bottom: 1.25rem; }
+    .qr-wrap { display: flex; justify-content: center; align-items: center; background: #fff; border-radius: 16px; padding: 1rem; margin-bottom: 0.75rem; }
+    .qr-hint { font-size: 0.78rem; color: var(--text3); margin-bottom: 1.25rem; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 0.65rem; }
+    .btn-pickup { flex: 1; padding: 0.85rem; background: var(--green); color: #fff; font-weight: 700; font-size: 0.9rem; border: none; border-radius: 12px; cursor: pointer; transition: opacity 0.15s; }
+    .btn-pickup:active { opacity: 0.8; }
+    .btn-close  { padding: 0.85rem 1rem; background: var(--surface2); color: var(--text2); font-size: 0.9rem; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+    /* Install banner */
+    .install-banner { display: none; position: fixed; bottom: 1rem; left: 1rem; right: 1rem; background: var(--primary); color: #fff; border-radius: 14px; padding: 0.85rem 1rem; font-size: 0.85rem; font-weight: 600; align-items: center; justify-content: space-between; z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+    .install-banner.show { display: flex; }
+    .install-banner button { background: rgba(255,255,255,0.2); border: none; color: #fff; padding: 0.4rem 0.85rem; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 0.82rem; }
+    .toast { position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%); background: #1e1e1e; color: var(--text); border: 1px solid var(--border); padding: 0.6rem 1.2rem; border-radius: 10px; font-size: 0.82rem; z-index: 500; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-brand">
+      <span class="ovr">OVR</span><span class="sep">/</span>
+      <span class="label">Driver Dispatch</span>
+    </div>
+    <div class="header-right">
+      <div class="status-dot" id="status-dot" title="Live"></div>
+      <button class="refresh-btn" id="refresh-btn">↻ Refresh</button>
+    </div>
+  </header>
+
+  <!-- Order List -->
+  <div class="list-wrap" id="list-wrap">
+    <div class="empty">
+      <div class="empty-icon">🛵</div>
+      <div class="empty-title">Loading orders...</div>
+    </div>
+  </div>
+
+  <!-- QR Modal -->
+  <div class="modal-overlay" id="qr-modal">
+    <div class="modal-box">
+      <div class="modal-order-id" id="m-order-id">Order #—</div>
+      <div class="modal-customer" id="m-customer"></div>
+      <div class="modal-address" id="m-address"></div>
+      <div class="qr-wrap"><div id="qr-canvas"></div></div>
+      <div class="qr-hint">Driver: scan with your phone camera to receive full delivery details on WhatsApp</div>
+      <div class="modal-actions">
+        <button class="btn-pickup" id="btn-pickup">✅ Mark as Picked Up</button>
+        <button class="btn-close"  id="btn-close">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Install banner -->
+  <div class="install-banner" id="install-banner">
+    <span>📲 Install Driver App for quick access</span>
+    <button id="install-btn">Install</button>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ── State ──────────────────────────────────────────────────
+    let orders = [];
+    let activeOrderId = null;
+    let deferredInstallPrompt = null;
+    let qrInstance = null;
+
+    // ── PWA Install ────────────────────────────────────────────
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      document.getElementById('install-banner').classList.add('show');
+    });
+    document.getElementById('install-btn').addEventListener('click', async () => {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === 'accepted') document.getElementById('install-banner').classList.remove('show');
+    });
+
+    // ── Toast ──────────────────────────────────────────────────
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    // ── Time ago ──────────────────────────────────────────────
+    function timeAgo(iso) {
+      const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+      if (s < 60)   return s + 's ago';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      return Math.floor(s / 3600) + 'h ago';
+    }
+
+    // ── Load Orders ────────────────────────────────────────────
+    async function loadOrders() {
+      const dot = document.getElementById('status-dot');
+      dot.style.background = '#ffc107';
+      try {
+        const res = await fetch('/api/orders/pending-delivery');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        orders = await res.json();
+        renderOrders();
+        dot.style.background = 'var(--green)';
+      } catch(e) {
+        dot.style.background = '#ff4a4a';
+        showToast('⚠️ Could not load orders');
+      }
+    }
+
+    // ── Render ─────────────────────────────────────────────────
+    function renderOrders() {
+      const wrap = document.getElementById('list-wrap');
+      if (!orders.length) {
+        wrap.innerHTML = '<div class="empty"><div class="empty-icon">🛵</div><div class="empty-title">No active delivery orders</div><div class="empty-sub">New orders will appear here automatically</div></div>';
+        return;
+      }
+
+      const active   = orders.filter(o => ['pending','confirmed','ready'].includes(o.status));
+      const recent   = orders.filter(o => !['pending','confirmed','ready'].includes(o.status));
+
+      let html = '';
+      if (active.length) {
+        html += '<div class="section-title">Active — ' + active.length + ' order' + (active.length > 1 ? 's' : '') + '</div>';
+        html += active.map(cardHTML).join('');
+      }
+      if (recent.length) {
+        html += '<div class="section-title" style="margin-top:1.25rem">Recently Completed</div>';
+        html += recent.map(cardHTML).join('');
+      }
+      wrap.innerHTML = html;
+    }
+
+    function cardHTML(o) {
+      const name = (o.customer_name || 'Customer').trim();
+      const addr = (o.delivery_address || '').replace(/\\[Maps Pin:.*?\\]/gi,'').replace(/[\\r\\n]+/g,' ').trim();
+      const items = (o.items || []).filter(i => i && i.product_name).map(i => i.quantity + 'x ' + i.product_name).join(' • ') || '—';
+      const badgeMap = { pending:'badge-pending', confirmed:'badge-confirmed', ready:'badge-ready', completed:'badge-completed' };
+      const labelMap = { pending:'⏳ Pending', confirmed:'● Confirmed', ready:'✓ Ready', completed:'Completed' };
+      const badge = badgeMap[o.status] || 'badge-completed';
+      const label = labelMap[o.status] || o.status;
+      return '<div class="order-card" onclick="openQR(' + o.id + ')">' +
+        '<div class="order-card-top">' +
+          '<span class="order-id">#' + o.id + '</span>' +
+          '<div style="display:flex;align-items:center;gap:0.5rem;">' +
+            '<span class="order-badge ' + badge + '">' + label + '</span>' +
+            '<span class="order-time">' + timeAgo(o.created_at) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="order-name">👤 ' + esc(name) + '</div>' +
+        (addr ? '<div class="order-addr">📍 ' + esc(addr) + '</div>' : '') +
+        '<div class="order-bottom">' +
+          '<span class="order-items-preview">🛒 ' + esc(items) + '</span>' +
+          '<span class="order-total">$' + Number(o.total_amount || 0).toFixed(2) + '</span>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function esc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── QR Modal ───────────────────────────────────────────────
+    window.openQR = function(orderId) {
+      activeOrderId = orderId;
+      const order = orders.find(o => o.id === orderId);
+      if (!order) return;
+
+      const name = (order.customer_name || 'Customer').trim();
+      const addr = (order.delivery_address || '').replace(/\\[Maps Pin:.*?\\]/gi,'').replace(/[\\r\\n]+/g,' ').trim();
+
+      document.getElementById('m-order-id').textContent = 'Order #' + orderId;
+      document.getElementById('m-customer').textContent = '👤 ' + name + (order.customer_phone ? '  ·  ' + order.customer_phone : '');
+      document.getElementById('m-address').textContent  = addr ? '📍 ' + addr : '';
+
+      // Generate QR
+      const canvas = document.getElementById('qr-canvas');
+      canvas.innerHTML = '';
+      const url = 'https://ovrload-nine.vercel.app/driver/scan?orderId=' + orderId;
+      qrInstance = new QRCode(canvas, { text: url, width: 220, height: 220, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
+
+      document.getElementById('qr-modal').classList.add('open');
+    };
+
+    document.getElementById('btn-close').addEventListener('click', closeModal);
+    document.getElementById('qr-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+    function closeModal() { document.getElementById('qr-modal').classList.remove('open'); activeOrderId = null; }
+
+    // ── Mark as Picked Up ──────────────────────────────────────
+    document.getElementById('btn-pickup').addEventListener('click', async () => {
+      if (!activeOrderId) return;
+      const btn = document.getElementById('btn-pickup');
+      btn.textContent = 'Updating...'; btn.disabled = true;
+      try {
+        const res = await fetch('/api/orders/' + activeOrderId + '/status', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'delivered' })
+        });
+        if (res.ok) {
+          closeModal();
+          showToast('✅ Order #' + activeOrderId + ' marked as picked up');
+          await loadOrders();
+        } else {
+          showToast('⚠️ Failed to update order');
+        }
+      } catch(e) {
+        showToast('⚠️ Connection error');
+      } finally {
+        btn.textContent = '✅ Mark as Picked Up'; btn.disabled = false;
+      }
+    });
+
+    // ── Auto-refresh ───────────────────────────────────────────
+    document.getElementById('refresh-btn').addEventListener('click', () => { loadOrders(); showToast('Refreshed'); });
+    setInterval(loadOrders, 30000);
+
+    // ── Boot ───────────────────────────────────────────────────
+    loadOrders();
+
+    // Register service worker for PWA offline support
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/driver-sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>`);
+});
+
+// Minimal service worker for PWA caching
+app.get('/driver-sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send([
+    "const CACHE = 'driver-v1';",
+    "const ASSETS = ['/driver'];",
+    "self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {}))));",
+    "self.addEventListener('fetch', e => {",
+    "  if (e.request.url.includes('/api/')) return;",
+    "  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));",
+    "});"
+  ].join('\n'));
+});
+
+
 // Page Routes
+
 app.get('/admin', (req, res) => {
   const cookiePasscode = req.cookies.admin_passcode;
   const adminPasscode = process.env.ADMIN_PASSCODE;
