@@ -906,15 +906,18 @@ app.post('/api/driver/scan', async (req, res) => {
     const cleanAddr = String(order.delivery_address || 'Pickup')
       .replace(/\[Maps Pin:[^\]]*\]/gi, '').replace(/[\r\n]+/g, ' ').trim() || 'Pickup';
 
-    // Full delivery message
-    let driverText = '🛵 *DELIVERY ORDER - OVR LOAD*\n';
-    driverText += '━━━━━━━━━━━━━━━━━━━━━━━\n\n';
-    driverText += '*Order:* #' + order.id + '\n\n';
-    driverText += '*Customer:* ' + (order.customer_name || '-') + '\n';
-    driverText += '*Phone:* ' + (order.customer_phone || 'N/A') + '\n';
-    driverText += '*Address:* ' + cleanAddr + '\n\n';
-    driverText += '*Items:*\n' + multiLineItems + '\n\n';
-    driverText += '*Collect:* $' + Number(order.total_amount || 0).toFixed(2);
+    // Infobip placeholders cannot contain newlines — use single-line compact format
+    const itemsSingle = items
+      .map(i => i.quantity + 'x ' + (i.product_name || 'Item'))
+      .join(', ');
+
+    const driverText = '🛵 OVR LOAD DELIVERY'
+      + ' | Order #' + order.id
+      + ' | ' + (order.customer_name || '-')
+      + ' | ' + (order.customer_phone || 'N/A')
+      + ' | ' + cleanAddr
+      + ' | ' + itemsSingle
+      + ' | Collect: $' + Number(order.total_amount || 0).toFixed(2);
 
     // Normalize phone
     let target = String(phoneNum).replace(/\D/g, '');
@@ -926,8 +929,9 @@ app.post('/api/driver/scan', async (req, res) => {
     const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
     const sender = (process.env.INFOBIP_WHATSAPP_SENDER || '15558376100').replace('+', '').trim();
 
-    // wa.me fallback URL (in case Infobip fails)
+    // wa.me fallback keeps full multiline format
     const waUrl = 'https://wa.me/' + target + '?text=' + encodeURIComponent(driverText);
+
 
     let sentVia = null;
     try {
