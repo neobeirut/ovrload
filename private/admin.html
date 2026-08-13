@@ -49,6 +49,59 @@
         </div>
       </div>
 
+      <!-- Category Report Section: Total items and amount per category -->
+      <div id="category-report-section" class="table-card glass" style="margin-bottom: 2rem; padding: 1.25rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--surface-border);">
+          <div>
+            <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+              📊 Category Report <span style="font-size: 0.8rem; font-weight: 500; color: var(--text-tertiary); background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 12px;">Totals & Revenue per Category</span>
+            </h2>
+          </div>
+          <button id="refresh-category-report-btn" class="add-btn" style="background: rgba(255,255,255,0.05); color: var(--text-primary); border: 1px solid var(--surface-border); font-size: 0.8rem; padding: 6px 12px;">
+            ↻ Refresh Report
+          </button>
+        </div>
+
+        <!-- KPI Metrics Grid -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--surface-border); border-radius: 10px; padding: 0.85rem 1rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Products</div>
+            <div id="kpi-report-products" style="font-size: 1.5rem; font-weight: 800; color: var(--text-primary); margin-top: 2px;">-</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--surface-border); border-radius: 10px; padding: 0.85rem 1rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Catalog Value</div>
+            <div id="kpi-report-inv-amount" style="font-size: 1.5rem; font-weight: 800; color: #17a2b8; margin-top: 2px;">-</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--surface-border); border-radius: 10px; padding: 0.85rem 1rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Total Items Sold</div>
+            <div id="kpi-report-items-sold" style="font-size: 1.5rem; font-weight: 800; color: var(--primary); margin-top: 2px;">-</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--surface-border); border-radius: 10px; padding: 0.85rem 1rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Total Sales Revenue</div>
+            <div id="kpi-report-sales-amount" style="font-size: 1.5rem; font-weight: 800; color: #28a745; margin-top: 2px;">-</div>
+          </div>
+        </div>
+
+        <!-- Category Breakdown Table -->
+        <div class="table-wrapper">
+          <table class="admin-table" style="font-size: 0.9rem;">
+            <thead>
+              <tr>
+                <th class="admin-th">Category</th>
+                <th class="admin-th" style="text-align: center;">Catalog Products</th>
+                <th class="admin-th" style="text-align: right;">Catalog Amount ($)</th>
+                <th class="admin-th" style="text-align: center;">Items Sold</th>
+                <th class="admin-th" style="text-align: right;">Sales Amount ($)</th>
+                <th class="admin-th" style="text-align: center; width: 140px;">Sales Share</th>
+              </tr>
+            </thead>
+            <tbody id="category-report-tbody">
+              <tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">Loading category report...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Inventory Table -->
       <div class="table-card glass">
         <div class="table-wrapper">

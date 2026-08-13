@@ -496,6 +496,79 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dispatchPanel.style.display !== 'none') loadDispatchOrders();
   }, 30000);
 
+  // ── Category Report Logic ────────────────────────────────────
+  const refreshCategoryReportBtn = document.getElementById('refresh-category-report-btn');
+  const categoryReportTbody = document.getElementById('category-report-tbody');
+  const kpiProducts = document.getElementById('kpi-report-products');
+  const kpiInvAmount = document.getElementById('kpi-report-inv-amount');
+  const kpiItemsSold = document.getElementById('kpi-report-items-sold');
+  const kpiSalesAmount = document.getElementById('kpi-report-sales-amount');
+
+  async function loadCategoryReport() {
+    if (!categoryReportTbody) return;
+    categoryReportTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">Loading category report...</td></tr>`;
+
+    try {
+      const res = await fetch('api/reports/category-summary');
+      if (!res.ok) {
+        categoryReportTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">Failed to load report data.</td></tr>`;
+        return;
+      }
+
+      const data = await res.json();
+      const { categories, totals } = data;
+
+      // Update KPI metrics
+      if (kpiProducts) kpiProducts.textContent = totals.total_products || 0;
+      if (kpiInvAmount) kpiInvAmount.textContent = `$${Number(totals.total_inventory_amount || 0).toFixed(2)}`;
+      if (kpiItemsSold) kpiItemsSold.textContent = totals.total_items_sold || 0;
+      if (kpiSalesAmount) kpiSalesAmount.textContent = `$${Number(totals.total_sales_amount || 0).toFixed(2)}`;
+
+      if (!categories || categories.length === 0) {
+        categoryReportTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">No category report data available.</td></tr>`;
+        return;
+      }
+
+      categoryReportTbody.innerHTML = categories.map(cat => {
+        const sharePct = totals.total_sales_amount > 0 
+          ? Math.round((cat.total_sales_amount / totals.total_sales_amount) * 100) 
+          : 0;
+
+        return `
+          <tr class="admin-tr">
+            <td class="admin-td" style="font-weight: 700;">
+              <span class="td-category" style="display: inline-block; padding: 0.2rem 0.6rem; border-radius: 4px; background: rgba(255,255,255,0.06); font-size: 0.8rem; font-weight: 700;">
+                ${escapeHtml(cat.category)}
+              </span>
+            </td>
+            <td class="admin-td" style="text-align: center; font-weight: 600;">${cat.total_products}</td>
+            <td class="admin-td" style="text-align: right; font-weight: 600; color: #17a2b8;">$${Number(cat.total_inventory_amount).toFixed(2)}</td>
+            <td class="admin-td" style="text-align: center; font-weight: 700; color: var(--primary);">${cat.total_items_sold}</td>
+            <td class="admin-td" style="text-align: right; font-weight: 700; color: #28a745;">$${Number(cat.total_sales_amount).toFixed(2)}</td>
+            <td class="admin-td" style="text-align: center;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: center;">
+                <div style="flex: 1; background: rgba(255,255,255,0.08); height: 6px; border-radius: 3px; overflow: hidden; max-width: 70px;">
+                  <div style="width: ${sharePct}%; background: var(--primary); height: 100%; border-radius: 3px;"></div>
+                </div>
+                <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); width: 30px;">${sharePct}%</span>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+    } catch (err) {
+      console.error('Error loading category report:', err);
+      categoryReportTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 1.5rem; color: var(--text-secondary);">Connection error loading report.</td></tr>`;
+    }
+  }
+
+  if (refreshCategoryReportBtn) {
+    refreshCategoryReportBtn.addEventListener('click', loadCategoryReport);
+  }
+
   loadInventory();
+  loadCategoryReport();
 });
+
 

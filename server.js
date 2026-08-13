@@ -295,6 +295,76 @@ app.delete('/api/products/:id', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/reports/category-summary — Category totals (items & amount per category)
+app.get('/api/reports/category-summary', async (req, res) => {
+  try {
+    const invRes = await pool.query(`
+      SELECT 
+        COALESCE(c.name, 'Uncategorized') as category, 
+        COUNT(p.id)::int as total_products, 
+        COALESCE(SUM(p.price::numeric), 0)::float as total_inventory_amount
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      WHERE p.status = 'Available'
+      GROUP BY COALESCE(c.name, 'Uncategorized')
+    `);
+
+    const salesRes = await pool.query(`
+      SELECT 
+        COALESCE(c.name, 'Uncategorized') as category, 
+        COALESCE(SUM(oi.quantity), 0)::int as total_items_sold, 
+        COALESCE(SUM(oi.total_price::numeric), 0)::float as total_sales_amount
+      FROM order_items oi
+      JOIN products p ON oi.product_id = p.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.status != 'cancelled'
+      GROUP BY COALESCE(c.name, 'Uncategorized')
+    `);
+
+    const categoryMap = {};
+
+    invRes.rows.forEach(r => {
+      categoryMap[r.category] = {
+        category: r.category,
+        total_products: parseInt(r.total_products, 10) || 0,
+        total_inventory_amount: parseFloat(r.total_inventory_amount) || 0,
+        total_items_sold: 0,
+        total_sales_amount: 0
+      };
+    });
+
+    salesRes.rows.forEach(r => {
+      if (!categoryMap[r.category]) {
+        categoryMap[r.category] = {
+          category: r.category,
+          total_products: 0,
+          total_inventory_amount: 0,
+          total_items_sold: 0,
+          total_sales_amount: 0
+        };
+      }
+      categoryMap[r.category].total_items_sold = parseInt(r.total_items_sold, 10) || 0;
+      categoryMap[r.category].total_sales_amount = parseFloat(r.total_sales_amount) || 0;
+    });
+
+    const categories = Object.values(categoryMap).sort((a, b) => a.category.localeCompare(b.category));
+
+    const totals = categories.reduce((acc, cat) => {
+      acc.total_products += cat.total_products;
+      acc.total_inventory_amount += cat.total_inventory_amount;
+      acc.total_items_sold += cat.total_items_sold;
+      acc.total_sales_amount += cat.total_sales_amount;
+      return acc;
+    }, { total_products: 0, total_inventory_amount: 0, total_items_sold: 0, total_sales_amount: 0 });
+
+    res.json({ categories, totals });
+  } catch (error) {
+    console.error('Error generating category report:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // GET /api/categories
 app.get('/api/categories', async (req, res) => {
   try {
