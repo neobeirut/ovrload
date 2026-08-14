@@ -470,12 +470,11 @@
       })
         .then(function(r) { return r.json(); })
         .then(function(data) {
+          closeModal();
+          showToast('Order #' + activeOrderId + ' marked as Picked Up!');
+          loadOrders();
           if (data.waUrl) {
             window.open(data.waUrl, '_blank');
-            showToast('WhatsApp opened!');
-            closeModal();
-          } else {
-            showToast(data.error || 'Could not build link');
           }
         })
         .catch(function() { showToast('Connection error'); })

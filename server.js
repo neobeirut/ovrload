@@ -1070,8 +1070,8 @@ app.post('/api/driver/scan', async (req, res) => {
     if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
     if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
 
-    // Save driver phone in database
-    await client.query('UPDATE orders SET driver_phone = $1 WHERE id = $2', [target, Number(orderId)]);
+    // Save driver phone and mark order as delivered (picked up) in database
+    await client.query("UPDATE orders SET status = 'delivered', driver_phone = $1 WHERE id = $2", [target, Number(orderId)]);
 
     const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
     const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
