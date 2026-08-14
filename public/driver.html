@@ -341,9 +341,11 @@
       var payMethod = o.payment_method || '';
       var payClass  = payMethod.toLowerCase() === 'whish' ? 'pay-whish' : 'pay-cash';
       var payLabel  = payMethod || 'Cash';
+      var driverPhone = o.driver_phone ? o.driver_phone : '';
       var metaHtml  = '<div class="order-meta">' +
         '<span class="origin-pill">' + originEmoji(origin) + esc(origin) + '</span>' +
         (showPay ? '<span class="pay-pill ' + payClass + '">&#x1F4B0; ' + esc(payLabel) + '</span>' : '') +
+        (driverPhone ? '<span class="origin-pill" style="background:rgba(66,165,245,0.15);color:#42a5f5;border-color:rgba(66,165,245,0.3);">&#x1F50C; Driver: ' + esc(driverPhone) + '</span>' : '') +
         '</div>';
 
       var reverseBtn = isHistory ?
@@ -483,12 +485,13 @@
     // Mark as picked up
     document.getElementById('btn-pickup').addEventListener('click', function() {
       if (!activeOrderId) return;
+      var phoneInput = document.getElementById('driver-phone').value.trim() || localStorage.getItem('driver_phone') || '';
       var btn = document.getElementById('btn-pickup');
       btn.textContent = 'Updating...'; btn.disabled = true;
       fetch('/api/orders/' + activeOrderId + '/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'delivered' })
+        body: JSON.stringify({ status: 'delivered', driverPhone: phoneInput })
       })
         .then(function(r) {
           if (r.ok) {

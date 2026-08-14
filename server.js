@@ -597,7 +597,7 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
     const result = await client.query(`
       SELECT
         o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
-        o.created_at, o.customer_name, o.customer_phone,
+        o.created_at, o.customer_name, o.customer_phone, o.driver_phone,
         o.order_source, o.payment_method,
         json_agg(json_build_object(
           'quantity', oi.quantity,
@@ -629,7 +629,7 @@ app.get('/api/orders/picked-up', async (req, res) => {
     const result = await client.query(`
       SELECT
         o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
-        o.created_at, o.customer_name, o.customer_phone,
+        o.created_at, o.customer_name, o.customer_phone, o.driver_phone,
         o.order_source, o.payment_method,
         json_agg(json_build_object(
           'quantity', oi.quantity,
@@ -676,17 +676,31 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
 // PATCH /api/orders/:id/status — update order status (e.g. mark as delivered or reverse to preparing)
 // No auth required — driver marks orders as picked up from Android
 app.patch('/api/orders/:id/status', async (req, res) => {
-  const { status } = req.body;
+  const { status, driverPhone, phone } = req.body;
   const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
   }
   const client = await pool.connect();
   try {
-    const result = await client.query(
-      `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status`,
-      [status, Number(req.params.id)]
-    );
+    const rawPhone = driverPhone || phone;
+    let result;
+    if (rawPhone) {
+      let target = String(rawPhone).replace(/\D/g, '');
+      if (target.startsWith('00')) target = target.slice(2);
+      if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
+      if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
+
+      result = await client.query(
+        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone`,
+        [status, target, Number(req.params.id)]
+      );
+    } else {
+      result = await client.query(
+        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone`,
+        [status, Number(req.params.id)]
+      );
+    }
     if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
     res.json({ success: true, order: result.rows[0] });
   } catch (err) {
@@ -1055,6 +1069,9 @@ app.post('/api/driver/scan', async (req, res) => {
     if (target.startsWith('00')) target = target.slice(2);
     if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
     if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
+
+    // Save driver phone in database
+    await client.query('UPDATE orders SET driver_phone = $1 WHERE id = $2', [target, Number(orderId)]);
 
     const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
     const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
