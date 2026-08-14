@@ -623,6 +623,39 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
   }
 });
 
+// GET /api/orders/picked-up — delivery orders already picked up / delivered
+app.get('/api/orders/picked-up', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const result = await client.query(`
+      SELECT
+        o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
+        o.created_at, o.customer_name, o.customer_phone,
+        o.order_source, o.payment_method,
+        json_agg(json_build_object(
+          'quantity', oi.quantity,
+          'product_name', p.name,
+          'total_price', oi.total_price
+        ) ORDER BY oi.id) AS items
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p    ON p.id = oi.product_id
+      WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
+        AND o.status = 'delivered'
+        AND o.created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY o.id
+      ORDER BY o.created_at DESC
+      LIMIT 100
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching picked up delivery orders:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/orders/:id — single order detail (used by QR modal)
 app.get('/api/orders/:id', requireAuth, async (req, res) => {
   const client = await pool.connect();
@@ -641,11 +674,11 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/orders/:id/status — update order status (e.g. mark as delivered)
+// PATCH /api/orders/:id/status — update order status (e.g. mark as delivered or reverse to preparing)
 // No auth required — driver marks orders as picked up from Android
 app.patch('/api/orders/:id/status', async (req, res) => {
   const { status } = req.body;
-  const allowed = ['pending', 'confirmed', 'ready', 'delivered', 'cancelled'];
+  const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
   }
