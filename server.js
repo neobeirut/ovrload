@@ -79,17 +79,16 @@ app.get('/driver-manifest.json', (req, res) => {
 
 // Driver PWA — full page
 app.get('/driver', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'driver.html'));
 });
-
-
 
 // Service worker — network-first, fallback to cache
 app.get('/driver-sw.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.send(`
-const CACHE = 'driver-v3';
+const CACHE = 'driver-v4';
 const SHELL = ['/driver', '/driver-manifest.json', '/driver-icon.svg', 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'];
 
 self.addEventListener('install', e => {
