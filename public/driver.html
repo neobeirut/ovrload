@@ -490,7 +490,7 @@
       fetch('/api/orders/' + activeOrderId + '/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'delivered', driverPhone: phoneInput })
+        body: JSON.stringify({ status: 'completed', driverPhone: phoneInput })
       })
         .then(function(r) {
           if (r.ok) {

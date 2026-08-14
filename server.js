@@ -609,7 +609,7 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p    ON p.id = oi.product_id
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
-        AND o.status NOT IN ('cancelled', 'delivered')
+        AND o.status NOT IN ('cancelled', 'delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
       GROUP BY o.id
       ORDER BY o.created_at DESC
@@ -641,7 +641,7 @@ app.get('/api/orders/picked-up', async (req, res) => {
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p    ON p.id = oi.product_id
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
-        AND o.status = 'delivered'
+        AND o.status IN ('delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '7 days'
       GROUP BY o.id
       ORDER BY o.created_at DESC
@@ -1071,8 +1071,8 @@ app.post('/api/driver/scan', async (req, res) => {
     if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
     if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
 
-    // Save driver phone and mark order as delivered (picked up) in database
-    await client.query("UPDATE orders SET status = 'delivered', driver_phone = $1 WHERE id = $2", [target, Number(orderId)]);
+    // Save driver phone and mark order as completed (picked up) in database
+    await client.query("UPDATE orders SET status = 'completed', driver_phone = $1 WHERE id = $2", [target, Number(orderId)]);
 
     const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
     const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
