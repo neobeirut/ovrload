@@ -678,7 +678,7 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
 // No auth required — driver marks orders as picked up from Android
 app.patch('/api/orders/:id/status', async (req, res) => {
   const { status, driverPhone, phone } = req.body;
-  const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'];
+  const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
   }
