@@ -114,20 +114,21 @@ document.addEventListener('DOMContentLoaded', () => {
       if ((data.orders_active === false || data.is_active === false) && status === 'open') {
         status = 'closed';
       }
-      const reason = data.closure_reason ? ` (${data.closure_reason})` : '';
+      const rawReason = (data.closure_reason || '').trim();
+      const reasonText = rawReason ? ` (${rawReason})` : '';
       
       isBranchOpen = true;
       branchClosureMessage = '';
 
-      if (status === 'closed') {
+      if (status === 'closed_hour') {
         isBranchOpen = false;
-        branchClosureMessage = `Store is currently Closed${reason}`;
-      } else if (status === 'closed_hour') {
-        isBranchOpen = false;
-        branchClosureMessage = `Store is temporarily Closed for an Hour${reason}`;
+        branchClosureMessage = `Store is Closed For an Hour${reasonText}`;
       } else if (status === 'closed_today') {
         isBranchOpen = false;
-        branchClosureMessage = `Store is Closed for Today${reason}`;
+        branchClosureMessage = `Store is Closed For Today${reasonText}`;
+      } else if (status === 'closed') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is Closed${reasonText}`;
       } else if (data.weekday_schedule) {
         let sched = data.weekday_schedule;
         if (typeof sched === 'string') {
@@ -140,7 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
           
           if (dayConfig && dayConfig.active === false) {
             isBranchOpen = false;
-            branchClosureMessage = `Store is Closed on ${nowBeirutWeekday.charAt(0).toUpperCase() + nowBeirutWeekday.slice(1)}s`;
+            const capitalizedDay = nowBeirutWeekday.charAt(0).toUpperCase() + nowBeirutWeekday.slice(1);
+            branchClosureMessage = `Store is Closed on ${capitalizedDay}${reasonText}`;
           }
         }
       }
