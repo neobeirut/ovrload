@@ -684,6 +684,16 @@ app.patch('/api/orders/:id/status', async (req, res) => {
   }
   const client = await pool.connect();
   try {
+    if (status === 'preparing') {
+      const checkRes = await client.query(
+        "SELECT ((created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Beirut')::date = (NOW() AT TIME ZONE 'Asia/Beirut')::date) as is_today FROM orders WHERE id = $1",
+        [Number(req.params.id)]
+      );
+      if (checkRes.rows.length && !checkRes.rows[0].is_today) {
+        return res.status(400).json({ error: 'Only orders created today can be reversed to Preparing.' });
+      }
+    }
+
     const rawPhone = driverPhone || phone;
     let result;
     if (rawPhone) {

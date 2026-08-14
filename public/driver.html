@@ -312,6 +312,15 @@
       return '&#x1F3EA; ';
     }
 
+    function isToday(dateInput) {
+      if (!dateInput) return false;
+      var d = new Date(dateInput);
+      if (isNaN(d.getTime())) return false;
+      var orderDate = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Beirut' });
+      var todayDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Beirut' });
+      return orderDate === todayDate;
+    }
+
     function cardHTML(o, isHistory) {
       var name   = (o.customer_name || 'Customer').trim();
       var addr   = cleanAddr(o.delivery_address);
@@ -348,7 +357,8 @@
         (driverPhone ? '<span class="origin-pill" style="background:rgba(66,165,245,0.15);color:#42a5f5;border-color:rgba(66,165,245,0.3);">&#x1F50C; Driver: ' + esc(driverPhone) + '</span>' : '') +
         '</div>';
 
-      var reverseBtn = isHistory ?
+      var canReverse = isHistory && isToday(o.created_at);
+      var reverseBtn = canReverse ?
         '<button class="btn-reverse-card" onclick="openReverseConfirm(' + o.id + ', event)">' +
           '&#x21A9;&#xFE0F; Reverse to Preparing' +
         '</button>' : '';
