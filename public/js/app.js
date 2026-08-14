@@ -100,6 +100,72 @@ document.addEventListener('DOMContentLoaded', () => {
   // Set copyright year
   document.getElementById('year').textContent = new Date().getFullYear();
 
+  // Branch operational state
+  let isBranchOpen = true;
+  let branchClosureMessage = '';
+
+  async function fetchBranchStatus() {
+    try {
+      const res = await fetch('api/branch-status');
+      if (!res.ok) return;
+      const data = await res.json();
+      
+      const status = data.operational_status || (data.orders_active === false ? 'closed' : 'open');
+      const reason = data.closure_reason ? ` (${data.closure_reason})` : '';
+      
+      isBranchOpen = true;
+      branchClosureMessage = '';
+
+      if (status === 'closed') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is currently Closed${reason}`;
+      } else if (status === 'closed_hour') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is temporarily Closed for an Hour${reason}`;
+      } else if (status === 'closed_today') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is Closed for Today${reason}`;
+      } else if (data.weekday_schedule) {
+        let sched = data.weekday_schedule;
+        if (typeof sched === 'string') {
+          try { sched = JSON.parse(sched); } catch(e){}
+        }
+        
+        if (sched && typeof sched === 'object') {
+          const nowBeirutWeekday = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Beirut', weekday: 'long' }).toLowerCase();
+          const dayConfig = sched[nowBeirutWeekday];
+          
+          if (dayConfig && dayConfig.active === false) {
+            isBranchOpen = false;
+            branchClosureMessage = `Store is Closed on ${nowBeirutWeekday.charAt(0).toUpperCase() + nowBeirutWeekday.slice(1)}s`;
+          }
+        }
+      }
+
+      renderBranchNoticeBanner();
+    } catch(err) {
+      console.error('Error fetching branch status:', err);
+    }
+  }
+
+  function renderBranchNoticeBanner() {
+    const bannerEl = document.getElementById('branch-notice-banner');
+    if (!bannerEl) return;
+
+    if (!isBranchOpen) {
+      bannerEl.style.display = 'flex';
+      bannerEl.innerHTML = `
+        <span style="font-size: 1.2rem;">⚠️</span>
+        <div>
+          <div style="font-weight: 800; font-size: 0.9rem;">Store Notice</div>
+          <div style="font-size: 0.8rem; opacity: 0.95;">${branchClosureMessage}. Ordering is temporarily paused.</div>
+        </div>
+      `;
+    } else {
+      bannerEl.style.display = 'none';
+    }
+  }
+
   // Load backend order settings
   async function loadOrderSettings() {
     try {
@@ -907,6 +973,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle Form Submit / Checkout
   checkoutForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    if (!isBranchOpen) {
+      alert(`⚠️ ${branchClosureMessage}\n\nWe cannot process new orders at this time. Thank you for your understanding!`);
+      return;
+    }
     
     if (cart.length === 0) {
       alert('Your cart is empty.');
@@ -1042,6 +1113,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initDragScroll();
   
   // Initial loading order
+  fetchBranchStatus();
   loadProducts();
   loadOrderSettings();
   loadUserInfo();

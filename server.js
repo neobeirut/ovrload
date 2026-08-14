@@ -440,11 +440,36 @@ app.get('/api/auth', (req, res) => {
 app.get('/api/branches', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, name, phone, location, delivery_start_time, delivery_end_time FROM branches WHERE is_active = true ORDER BY name ASC'
+      `SELECT id, name, phone, location, delivery_start_time, delivery_end_time, orders_active,
+              COALESCE(operational_status, 'open') as operational_status, closure_reason, weekday_schedule
+       FROM branches 
+       WHERE is_active = true AND COALESCE(operational_status, 'open') != 'closed' AND COALESCE(orders_active, true) = true 
+       ORDER BY name ASC`
     );
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching branches:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /api/branch-status — fetch active operational status & schedule for customer app
+app.get('/api/branch-status', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, phone, is_active, orders_active, opening_time, closing_time,
+              COALESCE(operational_status, 'open') as operational_status,
+              closure_reason, weekday_schedule
+       FROM branches
+       WHERE id = 1 LIMIT 1`
+    );
+    if (result.rows.length === 0) {
+      return res.json({ isOpen: true, operational_status: 'open' });
+    }
+    const branch = result.rows[0];
+    res.json(branch);
+  } catch (error) {
+    console.error('Error fetching branch status:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
