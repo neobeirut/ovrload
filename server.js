@@ -184,6 +184,7 @@ app.get('/api/products', async (req, res) => {
         p.price::float as unit_price_usd, 
         p.image_url, 
         p.sort_order, 
+        p.status,
         p.created_at,
         COALESCE(
           (SELECT json_agg(json_build_object(
@@ -202,7 +203,7 @@ app.get('/api/products', async (req, res) => {
         ) as customizations
        FROM products p
        LEFT JOIN categories c ON p.category_id = c.id
-       WHERE p.status = 'Available'
+       WHERE p.status IS NULL OR p.status != 'Hide from Menu'
        ORDER BY COALESCE(c.display_order, 9999) ASC, c.name ASC, p.sort_order ASC, p.name ASC`
     );
     res.json(result.rows);

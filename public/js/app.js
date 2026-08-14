@@ -171,26 +171,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (filtered.length > 0) {
-      productList.innerHTML = filtered.map(product => `
-        <article class="product-card glass" data-id="${product.id}">
+      productList.innerHTML = filtered.map(product => {
+        const isUnavailable = product.status && product.status !== 'Available';
+        const statusLabel = isUnavailable ? (product.status || 'Unavailable Today') : '';
+
+        return `
+        <article class="product-card glass ${isUnavailable ? 'unavailable' : ''}" data-id="${product.id}">
           ${product.image_url ? `<img src="${escapeHtml(product.image_url)}" class="card-img" alt="${escapeHtml(product.name)}">` : ''}
           <div class="card-header">
             <h2 class="card-title">${escapeHtml(product.name)}</h2>
-            <span class="card-category">${escapeHtml(product.category)}</span>
+            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:0.25rem;">
+              <span class="card-category">${escapeHtml(product.category)}</span>
+              ${isUnavailable ? `<span class="card-status-badge unavailable">${escapeHtml(statusLabel)}</span>` : ''}
+            </div>
           </div>
           ${product.description ? `<p class="card-description">${escapeHtml(product.description)}</p>` : ''}
           <div class="product-card-footer">
             <span class="card-price">$${product.unit_price_usd.toFixed(2)}</span>
-            <button type="button" class="btn-quick-add" data-id="${product.id}">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle; display: inline-block;">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-              Add
-            </button>
+            ${isUnavailable ? `
+              <button type="button" class="btn-quick-add unavailable" disabled>
+                Unavailable
+              </button>
+            ` : `
+              <button type="button" class="btn-quick-add" data-id="${product.id}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 4px; vertical-align: middle; display: inline-block;">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Add
+              </button>
+            `}
           </div>
         </article>
-      `).join('');
+      `;
+      }).join('');
 
       // Attach detail drawer click events
       productList.querySelectorAll('.product-card').forEach(card => {
@@ -202,12 +216,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       // Attach quick add button click events
-      productList.querySelectorAll('.btn-quick-add').forEach(btn => {
+      productList.querySelectorAll('.btn-quick-add:not([disabled])').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation(); // Prevent triggering card click (opening drawer)
           const id = parseInt(btn.getAttribute('data-id'));
           const product = products.find(p => p.id === id);
-          if (!product) return;
+          if (!product || (product.status && product.status !== 'Available')) return;
 
           // If the product has customizations, we must open the drawer so they can choose options
           if (product.customizations && product.customizations.length > 0) {
@@ -274,7 +288,32 @@ document.addEventListener('DOMContentLoaded', () => {
       drawerImage.src = '';
       drawerImage.style.display = 'none';
     }
-    
+
+    const isUnavailable = product.status && product.status !== 'Available';
+    const existingAlert = drawerDesc.parentNode.querySelector('.unavailable-drawer-alert');
+    if (existingAlert) existingAlert.remove();
+
+    if (isUnavailable) {
+      const alertDiv = document.createElement('div');
+      alertDiv.className = 'unavailable-drawer-alert';
+      alertDiv.textContent = `⚠️ This item is currently ${product.status || 'Unavailable Today'}`;
+      drawerDesc.parentNode.insertBefore(alertDiv, drawerDesc.nextSibling);
+
+      addToCartBtn.disabled = true;
+      addToCartBtn.style.opacity = '0.5';
+      addToCartBtn.style.cursor = 'not-allowed';
+      addToCartBtn.textContent = product.status || 'Unavailable Today';
+      detailQtyMinus.disabled = true;
+      detailQtyPlus.disabled = true;
+    } else {
+      addToCartBtn.disabled = false;
+      addToCartBtn.style.opacity = '1';
+      addToCartBtn.style.cursor = 'pointer';
+      addToCartBtn.textContent = 'Add to Order';
+      detailQtyMinus.disabled = false;
+      detailQtyPlus.disabled = false;
+    }
+
     // Render customizations
     drawerCustomizations.innerHTML = '';
     if (product.customizations && product.customizations.length > 0) {
@@ -415,6 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Add to Cart implementation
   addToCartBtn.addEventListener('click', () => {
     if (!currentProductInDrawer) return;
+    if (currentProductInDrawer.status && currentProductInDrawer.status !== 'Available') return;
 
     const selectedCustomizations = [];
     const checkedInputs = drawerCustomizations.querySelectorAll('input:checked');
