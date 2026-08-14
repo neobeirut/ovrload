@@ -110,7 +110,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) return;
       const data = await res.json();
       
-      const status = data.operational_status || (data.orders_active === false ? 'closed' : 'open');
+      let status = data.operational_status || 'open';
+      if ((data.orders_active === false || data.is_active === false) && status === 'open') {
+        status = 'closed';
+      }
       const reason = data.closure_reason ? ` (${data.closure_reason})` : '';
       
       isBranchOpen = true;

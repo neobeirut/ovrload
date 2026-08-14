@@ -467,6 +467,9 @@ app.get('/api/branch-status', async (req, res) => {
       return res.json({ isOpen: true, operational_status: 'open' });
     }
     const branch = result.rows[0];
+    if ((branch.orders_active === false || branch.is_active === false) && branch.operational_status === 'open') {
+      branch.operational_status = 'closed';
+    }
     res.json(branch);
   } catch (error) {
     console.error('Error fetching branch status:', error);
