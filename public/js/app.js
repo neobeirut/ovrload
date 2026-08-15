@@ -130,47 +130,50 @@ document.addEventListener('DOMContentLoaded', () => {
         try { sched = JSON.parse(sched); } catch(e){}
       }
 
-      // PRIORITY 1: Closed (Indefinitely closed / hidden from customer)
+      // Determine today's operating hours
+      let openTime = (data.opening_time || '12:00').slice(0, 5);
+      let closeTime = (data.closing_time || '23:00').slice(0, 5);
+      let isWeekdayActive = true;
+
+      if (sched && typeof sched === 'object' && sched[nowBeirutWeekday]) {
+        const dayConfig = sched[nowBeirutWeekday];
+        if (dayConfig.active === false) {
+          isWeekdayActive = false;
+        } else {
+          if (dayConfig.open) openTime = dayConfig.open.slice(0, 5);
+          if (dayConfig.close) closeTime = dayConfig.close.slice(0, 5);
+        }
+      }
+
+      const capitalizedDay = nowBeirutWeekday.charAt(0).toUpperCase() + nowBeirutWeekday.slice(1);
+      const isOutsideHours = (currentHHMM < openTime || currentHHMM >= closeTime);
+
+      // PRIORITY 1: Closed (Indefinitely closed / hidden from customer in Admin)
       if (status === 'closed') {
         isBranchOpen = false;
         branchClosureMessage = `Store is Closed${reasonText}`;
       } 
-      // PRIORITY 2: Temporary Operational Closures (closed_hour or closed_today)
+      // PRIORITY 2: Weekday Closed for today
+      else if (!isWeekdayActive) {
+        isBranchOpen = false;
+        branchClosureMessage = `Kitchen Closed on ${capitalizedDay}${reasonText}`;
+      }
+      // PRIORITY 3: Outside Operating Hours (Before openTime or After closeTime)
+      else if (isOutsideHours) {
+        isBranchOpen = false;
+        if (currentHHMM < openTime) {
+          branchClosureMessage = `Store is Closed (Opens today at ${openTime})`;
+        } else {
+          branchClosureMessage = `Store is Closed (Operating Hours: ${openTime} - ${closeTime})`;
+        }
+      }
+      // PRIORITY 4: Operational Closures during Opening Hours (closed_hour or closed_today)
       else if (status === 'closed_hour') {
         isBranchOpen = false;
         branchClosureMessage = `Store is Closed For an Hour${reasonText}`;
       } else if (status === 'closed_today') {
         isBranchOpen = false;
         branchClosureMessage = `Store is Closed For Today${reasonText}`;
-      } 
-      // PRIORITY 3: Weekday Operating Schedule
-      else if (sched && typeof sched === 'object' && sched[nowBeirutWeekday]) {
-        const dayConfig = sched[nowBeirutWeekday];
-        const capitalizedDay = nowBeirutWeekday.charAt(0).toUpperCase() + nowBeirutWeekday.slice(1);
-
-        if (dayConfig.active === false) {
-          isBranchOpen = false;
-          branchClosureMessage = `Kitchen Closed on ${capitalizedDay}${reasonText}`;
-        } else {
-          // Check opening and closing hours for today
-          const openTime = (dayConfig.open || '09:00').slice(0, 5);
-          const closeTime = (dayConfig.close || '23:00').slice(0, 5);
-
-          if (currentHHMM < openTime || currentHHMM >= closeTime) {
-            isBranchOpen = false;
-            branchClosureMessage = `Kitchen Closed (Operating Hours: ${openTime} - ${closeTime})`;
-          }
-        }
-      } 
-      // PRIORITY 4: Fallback Default Operating Hours
-      else {
-        const defaultOpen = (data.opening_time || '09:00').slice(0, 5);
-        const defaultClose = (data.closing_time || '23:00').slice(0, 5);
-
-        if (currentHHMM < defaultOpen || currentHHMM >= defaultClose) {
-          isBranchOpen = false;
-          branchClosureMessage = `Store is Currently Closed (Operating Hours: ${defaultOpen} - ${defaultClose})`;
-        }
       }
 
       renderBranchNoticeBanner();
