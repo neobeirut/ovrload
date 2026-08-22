@@ -1114,7 +1114,7 @@ app.post('/api/driver/scan', async (req, res) => {
 
     const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
     const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
-    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || '15558376100').replace('+', '').trim();
+    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || '96181202607').replace('+', '').trim();
 
     // wa.me fallback keeps full multiline format
     const waUrl = 'https://wa.me/' + target + '?text=' + encodeURIComponent(driverText);
