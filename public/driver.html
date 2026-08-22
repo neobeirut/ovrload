@@ -484,7 +484,7 @@
           showToast('Order #' + activeOrderId + ' marked as Picked Up!');
           loadOrders();
           if (data.waUrl) {
-            window.open(data.waUrl, '_blank');
+            window.location.href = data.waUrl;
           }
         })
         .catch(function() { showToast('Connection error'); })

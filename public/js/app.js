@@ -1001,7 +1001,16 @@ document.addEventListener('DOMContentLoaded', () => {
     text += `\u2022 *Delivery Fee:* $${effectiveDeliveryFee.toFixed(2)}\r\n`;
     text += `\u2022 *Total Amount:* $${totalVal.toFixed(2)}`;
 
-    return `https://api.whatsapp.com/send?phone=96181202607&text=${encodeURIComponent(text)}`;
+    return `https://wa.me/96181202607?text=${encodeURIComponent(text)}`;
+  }
+
+  // Handle Close for Order Success Overlay Modal
+  const closeSuccessBtn = document.getElementById('btn-close-success-modal');
+  const successOverlay = document.getElementById('order-success-overlay');
+  if (closeSuccessBtn && successOverlay) {
+    closeSuccessBtn.addEventListener('click', () => {
+      successOverlay.style.display = 'none';
+    });
   }
 
   // Handle Form Submit / Checkout
@@ -1055,9 +1064,31 @@ document.addEventListener('DOMContentLoaded', () => {
       submitBtn.innerText = 'Placing Order...';
     }
 
+    const waUrl = getWhatsAppUrl();
+
+    // Helper to finish order, reset cart, show success modal, and trigger WhatsApp navigation
+    function finishAndOpenWhatsApp(url) {
+      // Clear cart
+      cart = [];
+      saveCart();
+      renderCart();
+      toggleCartDrawer(false);
+
+      // Show success modal on screen with direct WhatsApp button
+      const sOverlay = document.getElementById('order-success-overlay');
+      const sLink = document.getElementById('btn-open-whatsapp-direct');
+      if (sOverlay && sLink) {
+        sLink.href = url;
+        sOverlay.style.display = 'flex';
+      }
+
+      // Navigate window directly to WhatsApp (works on iOS Safari & Android without popup blocking)
+      window.location.href = url;
+    }
+
     // Save order to DB, then open WhatsApp so customer confirms directly
     try {
-      const response = await fetch('/api/orders/save', {
+      await fetch('/api/orders/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1082,23 +1113,17 @@ document.addEventListener('DOMContentLoaded', () => {
         })
       });
 
-      // Open WhatsApp with pre-filled order - customer sends it to OVR LOAD
-      window.open(getWhatsAppUrl(), '_blank');
+      finishAndOpenWhatsApp(waUrl);
     } catch (err) {
       console.error('Order save failed:', err);
-      alert('Your order was created! We are processing it now.');
+      // Fallback: still redirect to WhatsApp even if fetch encounters network error
+      finishAndOpenWhatsApp(waUrl);
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.innerText = 'Place the Order';
       }
     }
-
-    // Clear cart
-    cart = [];
-    saveCart();
-    renderCart();
-    toggleCartDrawer(false);
   });
 
   // Helper function to escape HTML special characters
