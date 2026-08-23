@@ -731,17 +731,23 @@ app.patch('/api/orders/:id/status', async (req, res) => {
       if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
 
       result = await client.query(
-        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone`,
+        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone, customer_phone`,
         [status, target, Number(req.params.id)]
       );
     } else {
       result = await client.query(
-        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone`,
+        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone, customer_phone`,
         [status, Number(req.params.id)]
       );
     }
     if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
-    res.json({ success: true, order: result.rows[0] });
+
+    const updatedOrder = result.rows[0];
+    if (status === 'completed' && updatedOrder.customer_phone) {
+      await sendCustomerOutForDeliveryNotification(updatedOrder.id, updatedOrder.customer_phone);
+    }
+
+    res.json({ success: true, order: updatedOrder });
   } catch (err) {
     console.error('Error updating order status:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -945,6 +951,112 @@ async function sendInfobipOrderNotifications({
   if (clientTarget && clientTarget !== "96181202607") {
     const clientConfirmationText = `${baseOrderInfo}\r\n\r\nWe are preparing your items now! Thank you for ordering from OVRLOAD`;
     await sendMessageSmart(customerPhone, clientConfirmationText, singleLinePlaceholder);
+  }
+}
+
+// Helper function to send "Out for Delivery" WhatsApp notification to customer
+async function sendCustomerOutForDeliveryNotification(orderId, customerPhone) {
+  if (!customerPhone) return;
+  let target = String(customerPhone).replace(/\D/g, "");
+  if (target.startsWith("00")) target = target.slice(2);
+  if (target.startsWith("0") && target.length === 8) target = `961${target.slice(1)}`;
+  if (!target.startsWith("961") && target.length >= 7 && target.length <= 8) target = `961${target}`;
+
+  const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
+  const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
+  const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
+
+  // 1. Try Free-Form Text API first if session is active
+  try {
+    const textRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+      method: "POST",
+      headers: {
+        "Authorization": `App ${apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        from: sender,
+        to: target,
+        content: { text: `Your order #${orderId} is out for delivery.` }
+      })
+    });
+    const textData = await textRes.json().catch(() => ({}));
+    const statusObj = textData?.status || textData?.messages?.[0]?.status;
+
+    if (textRes.ok && (!statusObj || (statusObj.name !== "REJECTED_NO_SESSION" && statusObj.id !== 7010))) {
+      console.log(`[out_for_delivery] Text API sent to ${target}: status=${textRes.status}`, JSON.stringify(textData));
+      return textData;
+    }
+    console.warn(`[out_for_delivery] Text API rejected for ${target}, falling back to template...`);
+  } catch (e) {
+    console.warn(`[out_for_delivery] Text API error for ${target}, falling back to template:`, e.message);
+  }
+
+  // 2. Fallback to out_for_delivery Template API
+  try {
+    const tplRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
+      method: "POST",
+      headers: {
+        "Authorization": `App ${apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            from: sender,
+            to: target,
+            content: {
+              templateName: "out_for_delivery",
+              templateData: {
+                body: {
+                  placeholders: [String(orderId)]
+                }
+              },
+              language: "en"
+            }
+          }
+        ]
+      })
+    });
+    const tplData = await tplRes.json().catch(() => ({}));
+    console.log(`[out_for_delivery] Template sent to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
+
+    if (!tplRes.ok) {
+      // Fallback with en_US
+      try {
+        const fallbackRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
+          method: "POST",
+          headers: {
+            "Authorization": `App ${apiKey}`,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            messages: [
+              {
+                from: sender,
+                to: target,
+                content: {
+                  templateName: "out_for_delivery",
+                  templateData: {
+                    body: {
+                      placeholders: [String(orderId)]
+                    }
+                  },
+                  language: "en_US"
+                }
+              }
+            ]
+          })
+        });
+        const fallbackData = await fallbackRes.json().catch(() => ({}));
+        console.log(`[out_for_delivery] Fallback en_US template sent to ${target}: status=${fallbackRes.status}`, JSON.stringify(fallbackData));
+      } catch (e2) {}
+    }
+  } catch (err) {
+    console.error(`[out_for_delivery] Template API error for ${target}:`, err);
   }
 }
 
@@ -1183,6 +1295,11 @@ app.post('/api/driver/scan', async (req, res) => {
 
     // Save driver phone and mark order as completed (picked up) in database
     await client.query("UPDATE orders SET status = 'completed', driver_phone = $1 WHERE id = $2", [target, Number(orderId)]);
+
+    // Send "out_for_delivery" WhatsApp notification to customer
+    if (order.customer_phone) {
+      await sendCustomerOutForDeliveryNotification(order.id, order.customer_phone);
+    }
 
     const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
     const baseUrl = (process.env.INFOBIP_BASE_URL || 'https://y4r1q1.api.infobip.com').replace(/\/$/, '');
