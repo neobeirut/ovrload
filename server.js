@@ -909,7 +909,7 @@ async function sendInfobipOrderNotifications({
   }
 
   // Base Order Info Layout
-  let baseOrderInfo = `🍔 NEW ORDER #${orderId} - OVR LOAD\r\n`;
+  let baseOrderInfo = `NEW ORDER #${orderId} - OVR LOAD\r\n`;
   baseOrderInfo += `================================\r\n\r\n`;
   baseOrderInfo += `Customer Details:\r\n`;
   baseOrderInfo += `* Order ID: #${orderId}\r\n`;

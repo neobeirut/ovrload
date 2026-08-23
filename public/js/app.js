@@ -979,7 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const discountVal = discountPercent > 0 ? (subTotal * (discountPercent / 100)) : 0;
     const totalVal = subTotal - discountVal + effectiveDeliveryFee;
 
-    let text = `🍔 NEW ORDER - OVR LOAD\r\n`;
+    let text = `NEW ORDER - OVR LOAD\r\n`;
     text += `================================\r\n\r\n`;
     text += `Customer Details:\r\n`;
     text += `* Name: ${name}\r\n`;
