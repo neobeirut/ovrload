@@ -903,9 +903,10 @@ async function sendInfobipOrderNotifications({
   }
 
   // Base Order Info Layout
-  let baseOrderInfo = `🍔 NEW ORDER - OVR LOAD\r\n`;
+  let baseOrderInfo = `🍔 NEW ORDER #${orderId} - OVR LOAD\r\n`;
   baseOrderInfo += `================================\r\n\r\n`;
   baseOrderInfo += `Customer Details:\r\n`;
+  baseOrderInfo += `* Order ID: #${orderId}\r\n`;
   baseOrderInfo += `* Name: ${customerName || "Customer"}\r\n`;
   baseOrderInfo += `* Phone: ${customerPhone || "N/A"}\r\n`;
   baseOrderInfo += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
