@@ -793,14 +793,13 @@ async function sendInfobipOrderNotifications({
           content: { text: multiLineText }
         })
       });
-      const textData = await textRes.json().catch(() => ({}));
-      const msgStatus = textData?.messages?.[0]?.status;
+      const statusObj = textData?.status || textData?.messages?.[0]?.status;
 
-      if (textRes.ok && msgStatus && msgStatus.name !== "REJECTED_NO_SESSION" && msgStatus.id !== 7010) {
+      if (textRes.ok && (!statusObj || (statusObj.name !== "REJECTED_NO_SESSION" && statusObj.id !== 7010))) {
         console.log(`[infobip_dispatch] Multi-line text sent successfully to ${target}: status=${textRes.status}`, JSON.stringify(textData));
         return textData;
       }
-      console.warn(`[infobip_dispatch] Text API skipped/rejected for ${target} (${msgStatus?.name || "No session"}), falling back to template...`);
+      console.warn(`[infobip_dispatch] Text API rejected for ${target} (${statusObj?.name || "No session"}), falling back to template...`);
     } catch (e) {
       console.warn(`[infobip_dispatch] Text API error for ${target}, falling back to template:`, e.message);
     }
