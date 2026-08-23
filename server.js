@@ -793,6 +793,7 @@ async function sendInfobipOrderNotifications({
           content: { text: multiLineText }
         })
       });
+      const textData = await textRes.json().catch(() => ({}));
       const statusObj = textData?.status || textData?.messages?.[0]?.status;
 
       if (textRes.ok && (!statusObj || (statusObj.name !== "REJECTED_NO_SESSION" && statusObj.id !== 7010))) {
