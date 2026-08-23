@@ -942,7 +942,7 @@ async function sendInfobipOrderNotifications({
   if (!clientTarget.startsWith("961") && clientTarget.length >= 7 && clientTarget.length <= 8) clientTarget = `961${clientTarget}`;
 
   if (clientTarget && clientTarget !== "96181202607") {
-    const clientConfirmationText = `${baseOrderInfo}\r\n\r\n You order is being prepared, Thank you for ordering from OVRLOAD`;
+    const clientConfirmationText = `${baseOrderInfo}\r\n\r\nWe are preparing your items now! Thank you for ordering from OVRLOAD`;
     await sendMessageSmart(customerPhone, clientConfirmationText, singleLinePlaceholder);
   }
 }
