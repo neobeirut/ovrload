@@ -972,34 +972,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         custDesc = `   \u2514 _Options: ${names.join(', ')}_\r\n`;
       }
-      itemsText += `\u2022 ${item.qty}x *${item.name}*\r\n${custDesc}`;
+      itemsText += `* ${item.qty}x ${item.name}\r\n${custDesc}`;
     });
 
     const effectiveDeliveryFee = orderType === 'delivery' ? deliveryCost : 0;
     const discountVal = discountPercent > 0 ? (subTotal * (discountPercent / 100)) : 0;
     const totalVal = subTotal - discountVal + effectiveDeliveryFee;
 
-    let text = `*NEW ORDER - OVR LOAD*\r\n`;
+    let text = `🍔 NEW ORDER - OVR LOAD\r\n`;
     text += `================================\r\n\r\n`;
-    text += `*Customer Details:*\r\n`;
-    text += `\u2022 *Name:* ${name}\r\n`;
-    text += `\u2022 *Phone:* ${phone}\r\n`;
-    text += `\u2022 *Order Type:* ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
+    text += `Customer Details:\r\n`;
+    text += `* Name: ${name}\r\n`;
+    text += `* Phone: ${phone}\r\n`;
+    text += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
     if (orderType === 'delivery' && location) {
-      text += `\u2022 *Delivery Address:* ${location}\r\n`;
+      const mapsMatch = location.match(/\[Maps Pin:\s*(.*?)\]/i);
+      if (mapsMatch) {
+        const cleanAddr = location.replace(/\[Maps Pin:\s*.*?\]/gi, '').trim();
+        text += `* Delivery Address: ${cleanAddr}\r\n\r\n[Maps Pin: ${mapsMatch[1].trim()}]\r\n`;
+      } else {
+        text += `* Delivery Address: ${location}\r\n`;
+      }
     }
-    text += `\u2022 *Requested Time:* ${deliveryTime}\r\n\r\n`;
+    text += `* Requested Time: ${deliveryTime}\r\n\r\n`;
     
-    text += `*Items Ordered:*\r\n`;
+    text += `Items Ordered:\r\n`;
     text += itemsText + `\r\n`;
     
-    text += `*Payment Summary:*\r\n`;
-    text += `\u2022 *Subtotal:* $${subTotal.toFixed(2)}\r\n`;
+    text += `Payment Summary:\r\n`;
+    text += `* Subtotal: $${subTotal.toFixed(2)}\r\n`;
     if (discountPercent > 0) {
-      text += `\u2022 *WhatsApp Discount (${discountPercent}%):* -$${discountVal.toFixed(2)}\r\n`;
+      text += `* WhatsApp Discount (${discountPercent}%): -$${discountVal.toFixed(2)}\r\n`;
     }
-    text += `\u2022 *Delivery Fee:* $${effectiveDeliveryFee.toFixed(2)}\r\n`;
-    text += `\u2022 *Total Amount:* $${totalVal.toFixed(2)}`;
+    text += `* Delivery Fee: $${effectiveDeliveryFee.toFixed(2)}\r\n`;
+    text += `* Total Amount: $${totalVal.toFixed(2)}`;
 
     return `https://wa.me/96181202607?text=${encodeURIComponent(text)}`;
   }

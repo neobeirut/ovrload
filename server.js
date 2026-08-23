@@ -844,42 +844,52 @@ async function sendInfobipOrderNotifications({
 
   // Multi-line items list matching order layout exactly
   let itemsText = "";
-  const singleLineItems = (items || []).map((i) => `• ${i.qty || 1}x ${i.name || "Item"}`).join("  ");
-
   (items || []).forEach((item) => {
-    const itemTotal = (item.unit_price_usd || 0) * (item.qty || 1);
-    itemsText += `• ${item.qty || 1}x *${item.name || "Item"}* ($${itemTotal.toFixed(2)})\r\n`;
+    itemsText += `* ${item.qty || 1}x ${item.name || "Item"}\r\n`;
     if (item.customizations && item.customizations.length > 0) {
       const custs = item.customizations.map(c => typeof c === 'string' ? c : (c.type === 'remove' ? `No ${c.name}` : (c.name || c.ingredient))).join(', ');
       itemsText += `  + ${custs}\r\n`;
     }
   });
 
-  // Base Order Info Layout (same as app.js order layout)
-  let baseOrderInfo = `*NEW ORDER - OVR LOAD*\r\n`;
-  baseOrderInfo += `================================\r\n\r\n`;
-  baseOrderInfo += `*Customer Details:*\r\n`;
-  baseOrderInfo += `• *Name:* ${customerName || "Customer"}\r\n`;
-  baseOrderInfo += `• *Phone:* ${customerPhone || "N/A"}\r\n`;
-  baseOrderInfo += `• *Order Type:* ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
-  if (orderType !== 'pickup' && deliveryAddress) {
-    baseOrderInfo += `• *Delivery Address:* ${deliveryAddress}\r\n`;
+  // Separate address & Maps link if present
+  let cleanAddress = deliveryAddress || "";
+  let mapsPinUrl = "";
+  const mapsMatch = cleanAddress.match(/\[Maps Pin:\s*(.*?)\]/i);
+  if (mapsMatch) {
+    mapsPinUrl = mapsMatch[1].trim();
+    cleanAddress = cleanAddress.replace(/\[Maps Pin:\s*.*?\]/gi, "").trim();
   }
-  baseOrderInfo += `• *Requested Time:* ${deliveryTime || 'ASAP'}\r\n\r\n`;
 
-  baseOrderInfo += `*Items Ordered:*\r\n`;
+  // Base Order Info Layout
+  let baseOrderInfo = `🍔 NEW ORDER - OVR LOAD\r\n`;
+  baseOrderInfo += `================================\r\n\r\n`;
+  baseOrderInfo += `Customer Details:\r\n`;
+  baseOrderInfo += `* Name: ${customerName || "Customer"}\r\n`;
+  baseOrderInfo += `* Phone: ${customerPhone || "N/A"}\r\n`;
+  baseOrderInfo += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
+  if (orderType !== 'pickup' && cleanAddress) {
+    baseOrderInfo += `* Delivery Address: ${cleanAddress}\r\n`;
+    if (mapsPinUrl) {
+      baseOrderInfo += `\r\n[Maps Pin: ${mapsPinUrl}]\r\n`;
+    }
+  }
+  baseOrderInfo += `* Requested Time: ${deliveryTime || 'ASAP'}\r\n\r\n`;
+
+  baseOrderInfo += `Items Ordered:\r\n`;
   baseOrderInfo += itemsText + `\r\n`;
 
-  baseOrderInfo += `*Payment Summary:*\r\n`;
-  baseOrderInfo += `• *Subtotal:* $${Number(subtotal || 0).toFixed(2)}\r\n`;
+  baseOrderInfo += `Payment Summary:\r\n`;
+  baseOrderInfo += `* Subtotal: $${Number(subtotal || 0).toFixed(2)}\r\n`;
   if (Number(discountAmount || 0) > 0) {
-    baseOrderInfo += `• *WhatsApp Discount:* -$${Number(discountAmount || 0).toFixed(2)}\r\n`;
+    const discountPct = Number(subtotal) > 0 ? Math.round((Number(discountAmount) / Number(subtotal)) * 100) : 15;
+    baseOrderInfo += `* WhatsApp Discount (${discountPct}%): -$${Number(discountAmount || 0).toFixed(2)}\r\n`;
   }
-  baseOrderInfo += `• *Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
-  baseOrderInfo += `• *Total Amount:* $${Number(total || 0).toFixed(2)}`;
+  baseOrderInfo += `* Delivery Fee: $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
+  baseOrderInfo += `* Total Amount: $${Number(total || 0).toFixed(2)}`;
 
   // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
-  await sendMessageSmart("96181202607", baseOrderInfo, `OVR LOAD 🔹 🛒 ${singleLineItems} 🔹 💵 Total: $${Number(total || 0).toFixed(2)}`);
+  await sendMessageSmart("96181202607", baseOrderInfo, baseOrderInfo);
 
   // 2. Send Order Confirmation to Customer WhatsApp
   let clientTarget = String(customerPhone || "").replace(/\D/g, "");
@@ -889,8 +899,7 @@ async function sendInfobipOrderNotifications({
 
   if (clientTarget && clientTarget !== "96181202607") {
     const clientConfirmationText = `${baseOrderInfo}\r\n\r\n You order is being prepared, Thank you for ordering from OVRLOAD`;
-    const clientTemplatePlaceholder = `OVR LOAD 🔹 🛒 ${singleLineItems} 🔹 💵 Total: $${Number(total || 0).toFixed(2)}`;
-    await sendMessageSmart(customerPhone, clientConfirmationText, clientTemplatePlaceholder);
+    await sendMessageSmart(customerPhone, clientConfirmationText, baseOrderInfo);
   }
 }
 
