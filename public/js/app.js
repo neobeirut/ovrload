@@ -1066,29 +1066,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const waUrl = getWhatsAppUrl();
 
-    // Helper to finish order, reset cart, show success modal, and trigger WhatsApp navigation
-    function finishAndOpenWhatsApp(url) {
+    // Helper to finish order, reset cart, and show success modal
+    function finishOrderSuccess() {
       // Clear cart
       cart = [];
       saveCart();
       renderCart();
       toggleCartDrawer(false);
 
-      // Show success modal on screen with direct WhatsApp button
+      // Show success modal on screen
       const sOverlay = document.getElementById('order-success-overlay');
-      const sLink = document.getElementById('btn-open-whatsapp-direct');
-      if (sOverlay && sLink) {
-        sLink.href = url;
+      if (sOverlay) {
         sOverlay.style.display = 'flex';
       }
-
-      // Navigate window directly to WhatsApp (works on iOS Safari & Android without popup blocking)
-      window.location.href = url;
     }
 
-    // Save order to DB, then open WhatsApp so customer confirms directly
+    // Save order to DB and trigger automated Infobip WhatsApp confirmation
     try {
-      await fetch('/api/orders/save', {
+      const res = await fetch('/api/orders/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1113,11 +1108,15 @@ document.addEventListener('DOMContentLoaded', () => {
         })
       });
 
-      finishAndOpenWhatsApp(waUrl);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        finishOrderSuccess();
+      } else {
+        alert('Could not complete order: ' + (data.error || 'Please try again.'));
+      }
     } catch (err) {
       console.error('Order save failed:', err);
-      // Fallback: still redirect to WhatsApp even if fetch encounters network error
-      finishAndOpenWhatsApp(waUrl);
+      finishOrderSuccess();
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;

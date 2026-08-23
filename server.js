@@ -751,7 +751,7 @@ app.patch('/api/orders/:id/status', async (req, res) => {
 });
 
 
-// Helper function to send automated WhatsApp notifications via Infobip API (Hybrid Text + Template)
+// Helper function to send automated WhatsApp notifications via Infobip API
 async function sendInfobipOrderNotifications({
   orderId,
   customerName,
@@ -760,10 +760,9 @@ async function sendInfobipOrderNotifications({
   deliveryTime,
   items,
   subtotal,
+  discountAmount,
   deliveryFee,
   total,
-  lat,
-  lng,
   orderType
 }) {
   console.log(`[infobip_dispatch] START for Order #${orderId}`);
@@ -771,21 +770,9 @@ async function sendInfobipOrderNotifications({
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
 
-  // Multi-line items list
-  const multiLineItems = (items || [])
-    .map((i) => `• ${i.qty || 1}x *${i.name || i.product_name || "Item"}* ($${Number((i.unit_price_usd || 0) * (i.qty || 1)).toFixed(2)})`)
-    .join("\r\n");
-
-  // Single-line items list for template fallback
-  const singleLineItems = (items || [])
-    .map((i) => `• ${i.qty || 1}x ${i.name || i.product_name || "Item"}`)
-    .join("  ");
-
-  const cleanAddr = String(deliveryAddress || "Pickup / Not specified").replace(/\[Maps Pin:.*?\]/gi, "").replace(/[\r\n]+/g, " ").trim();
-  const gpsLink = (lat && lng) ? `https://maps.google.com/?q=${lat},${lng}` : null;
-
   // Helper for sending a message via Text API with Template Fallback
   async function sendMessageSmart(toPhone, multiLineText, templatePlaceholderText) {
+    if (!toPhone) return;
     let target = String(toPhone).replace(/\D/g, "");
     if (target.startsWith("00")) target = target.slice(2);
     if (target.startsWith("0") && target.length === 8) target = `961${target.slice(1)}`;
@@ -838,7 +825,7 @@ async function sendInfobipOrderNotifications({
                   body: {
                     placeholders: [
                       String(orderId),
-                      templatePlaceholderText
+                      templatePlaceholderText || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`
                     ]
                   }
                 },
@@ -855,43 +842,55 @@ async function sendInfobipOrderNotifications({
     }
   }
 
-  // 1. OVR LOAD MERCHANT NOTIFICATION (96181202607)
-  let merchantText = `*NEW ORDER #${orderId} - OVR LOAD*\r\n`;
-  merchantText += `================================\r\n\r\n`;
-  merchantText += `*Customer Details:*\r\n`;
-  merchantText += `• *Order #:* ${orderId}\r\n`;
-  merchantText += `• *Name:* ${customerName || "Customer"}\r\n`;
-  merchantText += `• *Phone:* ${customerPhone || "N/A"}\r\n`;
-  merchantText += `• *Order Type:* ${String(orderType || "delivery").toUpperCase()}\r\n`;
-  merchantText += `• *Delivery Address:* ${cleanAddr}\r\n`;
-  if (gpsLink) merchantText += `📍 *GPS Location:* ${gpsLink}\r\n`;
-  merchantText += `\r\n*Items Ordered:*\r\n${multiLineItems}\r\n\r\n`;
-  merchantText += `*Payment Summary:*\r\n`;
-  merchantText += `• *Subtotal:* $${Number(subtotal || 0).toFixed(2)}\r\n`;
-  if (deliveryFee) merchantText += `• *Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
-  merchantText += `• *Total Amount:* $${Number(total || 0).toFixed(2)}`;
+  // Multi-line items list matching order layout exactly
+  let itemsText = "";
+  const singleLineItems = (items || []).map((i) => `• ${i.qty || 1}x ${i.name || "Item"}`).join("  ");
 
-  // Send merchant notification (single clean message)
-  await sendMessageSmart("96181202607", merchantText, null);
+  (items || []).forEach((item) => {
+    const itemTotal = (item.unit_price_usd || 0) * (item.qty || 1);
+    itemsText += `• ${item.qty || 1}x *${item.name || "Item"}* ($${itemTotal.toFixed(2)})\r\n`;
+    if (item.customizations && item.customizations.length > 0) {
+      const custs = item.customizations.map(c => typeof c === 'string' ? c : (c.type === 'remove' ? `No ${c.name}` : (c.name || c.ingredient))).join(', ');
+      itemsText += `  + ${custs}\r\n`;
+    }
+  });
 
-  // 2. CLIENT ORDER CONFIRMATION (Sent only if customer phone is different from merchant phone)
+  // Base Order Info Layout (same as app.js order layout)
+  let baseOrderInfo = `*NEW ORDER - OVR LOAD*\r\n`;
+  baseOrderInfo += `================================\r\n\r\n`;
+  baseOrderInfo += `*Customer Details:*\r\n`;
+  baseOrderInfo += `• *Name:* ${customerName || "Customer"}\r\n`;
+  baseOrderInfo += `• *Phone:* ${customerPhone || "N/A"}\r\n`;
+  baseOrderInfo += `• *Order Type:* ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
+  if (orderType !== 'pickup' && deliveryAddress) {
+    baseOrderInfo += `• *Delivery Address:* ${deliveryAddress}\r\n`;
+  }
+  baseOrderInfo += `• *Requested Time:* ${deliveryTime || 'ASAP'}\r\n\r\n`;
+
+  baseOrderInfo += `*Items Ordered:*\r\n`;
+  baseOrderInfo += itemsText + `\r\n`;
+
+  baseOrderInfo += `*Payment Summary:*\r\n`;
+  baseOrderInfo += `• *Subtotal:* $${Number(subtotal || 0).toFixed(2)}\r\n`;
+  if (Number(discountAmount || 0) > 0) {
+    baseOrderInfo += `• *WhatsApp Discount:* -$${Number(discountAmount || 0).toFixed(2)}\r\n`;
+  }
+  baseOrderInfo += `• *Delivery Fee:* $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
+  baseOrderInfo += `• *Total Amount:* $${Number(total || 0).toFixed(2)}`;
+
+  // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
+  await sendMessageSmart("96181202607", baseOrderInfo, `OVR LOAD 🔹 🛒 ${singleLineItems} 🔹 💵 Total: $${Number(total || 0).toFixed(2)}`);
+
+  // 2. Send Order Confirmation to Customer WhatsApp
   let clientTarget = String(customerPhone || "").replace(/\D/g, "");
   if (clientTarget.startsWith("00")) clientTarget = clientTarget.slice(2);
   if (clientTarget.startsWith("0") && clientTarget.length === 8) clientTarget = `961${clientTarget.slice(1)}`;
   if (!clientTarget.startsWith("961") && clientTarget.length >= 7 && clientTarget.length <= 8) clientTarget = `961${clientTarget}`;
 
   if (clientTarget && clientTarget !== "96181202607") {
-    let clientText = `✅ *ORDER CONFIRMED - OVR LOAD*\r\n`;
-    clientText += `================================\r\n`;
-    clientText += `Order #${orderId} has been received!\r\n\r\n`;
-    clientText += `*Items Ordered:*\r\n${multiLineItems}\r\n\r\n`;
-    clientText += `*Payment Summary:*\r\n`;
-    clientText += `• *Total Amount:* $${Number(total || 0).toFixed(2)}\r\n\r\n`;
-    clientText += `We are preparing your items now! Thank you for ordering from OVR LOAD.`;
-
-    const clientTemplatePlaceholder = `OVR LOAD  🔹  🛒 ${singleLineItems}  🔹  💵 Total: $${Number(total || 0).toFixed(2)}`;
-
-    await sendMessageSmart(customerPhone, clientText, clientTemplatePlaceholder);
+    const clientConfirmationText = `${baseOrderInfo}\r\n\r\n You order is being prepared, Thank you for ordering from OVRLOAD`;
+    const clientTemplatePlaceholder = `OVR LOAD 🔹 🛒 ${singleLineItems} 🔹 💵 Total: $${Number(total || 0).toFixed(2)}`;
+    await sendMessageSmart(customerPhone, clientConfirmationText, clientTemplatePlaceholder);
   }
 }
 
@@ -973,6 +972,21 @@ app.post('/api/orders/save', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    // Trigger automated Infobip WhatsApp dispatch to customer and store
+    sendInfobipOrderNotifications({
+      orderId,
+      customerName,
+      customerPhone,
+      deliveryAddress,
+      deliveryTime,
+      items,
+      subtotal,
+      discountAmount,
+      deliveryFee,
+      total,
+      orderType
+    }).catch((err) => console.error('[orders/save] Infobip notification error:', err));
 
     res.json({ success: true, orderId });
   } catch (error) {

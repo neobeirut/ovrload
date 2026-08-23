@@ -12,14 +12,8 @@ async function inspectConfig() {
     `;
     console.log("Database tables:", tables.map(t => t.table_name));
 
-    // Check if system_settings or admin_settings exists
-    const settingsExists = tables.some(t => t.table_name === 'system_settings' || t.table_name === 'settings');
-    console.log("Settings table exists:", settingsExists);
-
-    if (settingsExists) {
-      const rows = await sql`SELECT * FROM system_settings LIMIT 10`;
-      console.log("Settings rows:", rows);
-    }
+    const rows = await sql`SELECT setting_key, setting_value FROM app_settings WHERE setting_key LIKE '%whatsapp%'`;
+    console.log("Settings rows:", rows);
   } catch (err) {
     console.error("Error inspecting database:", err);
   } finally {
