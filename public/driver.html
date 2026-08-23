@@ -416,15 +416,19 @@
       var url = 'https://ovrload-nine.vercel.app/driver/scan?orderId=' + orderId;
       new QRCode(canvas, { text: url, width: 200, height: 200, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
 
-      var saved = localStorage.getItem('driver_phone');
-      if (saved) document.getElementById('driver-phone').value = saved;
+      // Always clear the driver phone input field for each order
+      document.getElementById('driver-phone').value = '';
 
       document.getElementById('qr-modal').classList.add('open');
     };
 
     document.getElementById('btn-close').addEventListener('click', closeModal);
     document.getElementById('qr-modal').addEventListener('click', function(e) { if (e.target === e.currentTarget) closeModal(); });
-    function closeModal() { document.getElementById('qr-modal').classList.remove('open'); activeOrderId = null; }
+    function closeModal() {
+      document.getElementById('qr-modal').classList.remove('open');
+      document.getElementById('driver-phone').value = '';
+      activeOrderId = null;
+    }
 
     // Reverse status to Preparing modal handler
     window.openReverseConfirm = function(orderId, event) {
@@ -467,10 +471,10 @@
 
     // Send via WhatsApp (phone fallback)
     document.getElementById('btn-send-wa').addEventListener('click', function() {
-      var phone = document.getElementById('driver-phone').value.trim();
+      var phoneInput = document.getElementById('driver-phone');
+      var phone = phoneInput.value.trim();
       if (!phone) { showToast('Enter your phone number'); return; }
       if (!activeOrderId) return;
-      localStorage.setItem('driver_phone', phone);
       var btn = document.getElementById('btn-send-wa');
       btn.disabled = true; btn.textContent = '...';
       fetch('/api/driver/scan', {
@@ -480,6 +484,7 @@
       })
         .then(function(r) { return r.json(); })
         .then(function(data) {
+          phoneInput.value = '';
           closeModal();
           showToast('Order #' + activeOrderId + ' marked as Picked Up!');
           loadOrders();
@@ -494,16 +499,18 @@
     // Mark as picked up
     document.getElementById('btn-pickup').addEventListener('click', function() {
       if (!activeOrderId) return;
-      var phoneInput = document.getElementById('driver-phone').value.trim() || localStorage.getItem('driver_phone') || '';
+      var phoneInput = document.getElementById('driver-phone');
+      var phoneVal = phoneInput.value.trim();
       var btn = document.getElementById('btn-pickup');
       btn.textContent = 'Updating...'; btn.disabled = true;
       fetch('/api/orders/' + activeOrderId + '/status', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'completed', driverPhone: phoneInput })
+        body: JSON.stringify({ status: 'completed', driverPhone: phoneVal })
       })
         .then(function(r) {
           if (r.ok) {
+            phoneInput.value = '';
             closeModal();
             showToast('Order #' + activeOrderId + ' picked up');
             loadOrders();
