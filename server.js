@@ -837,6 +837,42 @@ async function sendInfobipOrderNotifications({
       });
       const tplData = await tplRes.json().catch(() => ({}));
       console.log(`[infobip_dispatch] Template sent to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
+
+      if (!tplRes.ok) {
+        // Fallback retry with en_US if en had a language mismatch
+        try {
+          const fallbackRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
+            method: "POST",
+            headers: {
+              "Authorization": `App ${apiKey}`,
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
+            body: JSON.stringify({
+              messages: [
+                {
+                  from: sender,
+                  to: target,
+                  content: {
+                    templateName: "order_confirmation",
+                    templateData: {
+                      body: {
+                        placeholders: [
+                          String(orderId),
+                          templatePlaceholderText || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`
+                        ]
+                      }
+                    },
+                    language: "en_US"
+                  }
+                }
+              ]
+            })
+          });
+          const fallbackData = await fallbackRes.json().catch(() => ({}));
+          console.log(`[infobip_dispatch] Fallback en_US template sent to ${target}: status=${fallbackRes.status}`, JSON.stringify(fallbackData));
+        } catch (e2) {}
+      }
     } catch (err) {
       console.error(`[infobip_dispatch] Template API error for ${target}:`, err);
     }
