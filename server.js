@@ -771,7 +771,7 @@ async function sendInfobipOrderNotifications({
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
 
   // Helper for sending a message via Text API with Template Fallback
-  async function sendMessageSmart(toPhone, multiLineText, templatePlaceholderText) {
+  async function sendMessageSmart(toPhone, multiLineText, singleLineTemplatePlaceholder) {
     if (!toPhone) return;
     let target = String(toPhone).replace(/\D/g, "");
     if (target.startsWith("00")) target = target.slice(2);
@@ -798,14 +798,19 @@ async function sendInfobipOrderNotifications({
 
       if (textRes.ok && msgStatus && msgStatus.name !== "REJECTED_NO_SESSION" && msgStatus.id !== 7010) {
         console.log(`[infobip_dispatch] Multi-line text sent successfully to ${target}: status=${textRes.status}`, JSON.stringify(textData));
-        return;
+        return textData;
       }
       console.warn(`[infobip_dispatch] Text API skipped/rejected for ${target} (${msgStatus?.name || "No session"}), falling back to template...`);
     } catch (e) {
       console.warn(`[infobip_dispatch] Text API error for ${target}, falling back to template:`, e.message);
     }
 
-    // 2. Fallback to Approved Template API
+    // 2. Fallback to Approved Template API (Must be single-line without newlines or tabs)
+    const cleanPlaceholder = String(singleLineTemplatePlaceholder || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`)
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
     try {
       const tplRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
         method: "POST",
@@ -825,7 +830,7 @@ async function sendInfobipOrderNotifications({
                   body: {
                     placeholders: [
                       String(orderId),
-                      templatePlaceholderText || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`
+                      cleanPlaceholder
                     ]
                   }
                 },
@@ -859,7 +864,7 @@ async function sendInfobipOrderNotifications({
                       body: {
                         placeholders: [
                           String(orderId),
-                          templatePlaceholderText || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`
+                          cleanPlaceholder
                         ]
                       }
                     },
@@ -924,8 +929,11 @@ async function sendInfobipOrderNotifications({
   baseOrderInfo += `* Delivery Fee: $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
   baseOrderInfo += `* Total Amount: $${Number(total || 0).toFixed(2)}`;
 
+  const singleLineItemsSummary = (items || []).map(i => `${i.qty || 1}x ${i.name || "Item"}`).join(", ");
+  const singleLinePlaceholder = `OVR LOAD (${singleLineItemsSummary} • Total: $${Number(total || 0).toFixed(2)})`;
+
   // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
-  await sendMessageSmart("96181202607", baseOrderInfo, baseOrderInfo);
+  await sendMessageSmart("96181202607", baseOrderInfo, singleLinePlaceholder);
 
   // 2. Send Order Confirmation to Customer WhatsApp
   let clientTarget = String(customerPhone || "").replace(/\D/g, "");
@@ -935,7 +943,7 @@ async function sendInfobipOrderNotifications({
 
   if (clientTarget && clientTarget !== "96181202607") {
     const clientConfirmationText = `${baseOrderInfo}\r\n\r\n You order is being prepared, Thank you for ordering from OVRLOAD`;
-    await sendMessageSmart(customerPhone, clientConfirmationText, baseOrderInfo);
+    await sendMessageSmart(customerPhone, clientConfirmationText, singleLinePlaceholder);
   }
 }
 
@@ -1019,19 +1027,23 @@ app.post('/api/orders/save', async (req, res) => {
     await client.query('COMMIT');
 
     // Trigger automated Infobip WhatsApp dispatch to customer and store
-    sendInfobipOrderNotifications({
-      orderId,
-      customerName,
-      customerPhone,
-      deliveryAddress,
-      deliveryTime,
-      items,
-      subtotal,
-      discountAmount,
-      deliveryFee,
-      total,
-      orderType
-    }).catch((err) => console.error('[orders/save] Infobip notification error:', err));
+    try {
+      await sendInfobipOrderNotifications({
+        orderId,
+        customerName,
+        customerPhone,
+        deliveryAddress,
+        deliveryTime,
+        items,
+        subtotal,
+        discountAmount,
+        deliveryFee,
+        total,
+        orderType
+      });
+    } catch (notifyErr) {
+      console.error('[orders/save] Infobip notification error:', notifyErr);
+    }
 
     res.json({ success: true, orderId });
   } catch (error) {
