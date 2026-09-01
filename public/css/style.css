@@ -1490,3 +1490,280 @@ button {
   transform: translateY(1px);
 }
 
+/* ── Progressive Web App (PWA) Install Prompt Styles ── */
+
+/* Quick install pill in controls section */
+.pwa-install-row {
+  margin-bottom: 0.85rem;
+  animation: fadeIn 0.4s var(--transition-normal);
+}
+
+.pwa-quick-install-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, rgba(230, 110, 25, 0.15) 0%, rgba(20, 20, 20, 0.85) 100%);
+  border: 1px solid rgba(230, 110, 25, 0.4);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(230, 110, 25, 0.15);
+}
+
+.pwa-quick-install-btn:hover {
+  background: linear-gradient(135deg, rgba(230, 110, 25, 0.25) 0%, rgba(30, 30, 30, 0.95) 100%);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(230, 110, 25, 0.25);
+}
+
+.pwa-quick-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pwa-pulsing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--primary);
+  box-shadow: 0 0 0 0 rgba(230, 110, 25, 0.7);
+  animation: pwaPulse 2s infinite;
+}
+
+@keyframes pwaPulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(230, 110, 25, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(230, 110, 25, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(230, 110, 25, 0);
+  }
+}
+
+.pwa-badge-pill {
+  padding: 0.25rem 0.65rem;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 6px rgba(230, 110, 25, 0.4);
+}
+
+/* Floating Bottom Install Banner */
+.pwa-install-banner {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 2.5rem);
+  max-width: 480px;
+  background: rgba(18, 18, 18, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(230, 110, 25, 0.45);
+  border-radius: var(--border-radius-lg);
+  padding: 1.25rem 1.25rem 1rem 1.25rem;
+  z-index: 999;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 24px rgba(230, 110, 25, 0.15);
+  animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pwa-banner-close-btn {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.05);
+  transition: all var(--transition-fast);
+}
+
+.pwa-banner-close-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.pwa-banner-body {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding-right: 1.5rem;
+}
+
+.pwa-banner-icon-container {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.pwa-banner-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pwa-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pwa-banner-tag {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--primary);
+}
+
+.pwa-banner-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.2;
+}
+
+.pwa-banner-subtitle {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.pwa-banner-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.pwa-btn-secondary {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--border-radius);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.88rem;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.pwa-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.pwa-btn-primary {
+  flex: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1rem;
+  background: var(--primary);
+  border: none;
+  border-radius: var(--border-radius);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.92rem;
+  box-shadow: 0 4px 14px rgba(230, 110, 25, 0.4);
+  transition: all var(--transition-fast);
+  text-align: center;
+  cursor: pointer;
+}
+
+.pwa-btn-primary:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 6px 18px rgba(230, 110, 25, 0.5);
+  transform: translateY(-1px);
+}
+
+/* iOS Step Instructions */
+.ios-steps-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  text-align: left;
+  margin-top: 0.5rem;
+}
+
+.ios-step-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--surface-border);
+  padding: 0.85rem 1rem;
+  border-radius: var(--border-radius);
+}
+
+.ios-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.82rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ios-step-text {
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ios-icon-badge {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* PWA Standalone Mode adjustments */
+@media all and (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pwa-install-banner,
+  .pwa-install-row {
+    display: none !important;
+  }
+}
+
+

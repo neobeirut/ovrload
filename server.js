@@ -86,6 +86,21 @@ function normalizePhone(input) {
 
 app.use(express.json());
 app.use(cookieParser());
+
+// ── Main Customer PWA ─────────────────────────────────────────
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(__dirname, 'public', 'sw.js'));
+});
+
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Driver PWA ────────────────────────────────────────────────

@@ -1179,6 +1179,162 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   initDragScroll();
+
+  // ── Progressive Web App (PWA) & Install Prompt Logic ────────
+  let deferredInstallPrompt = null;
+  const pwaInstallBanner = document.getElementById('pwa-install-banner');
+  const pwaBannerClose = document.getElementById('pwa-banner-close');
+  const btnPwaBannerDismiss = document.getElementById('btn-pwa-banner-dismiss');
+  const btnPwaBannerInstall = document.getElementById('btn-pwa-banner-install');
+  const pwaInstallRow = document.getElementById('pwa-install-row');
+  const btnPwaQuickInstall = document.getElementById('btn-pwa-quick-install');
+  const iosInstallOverlay = document.getElementById('ios-install-overlay');
+  const btnCloseIosGuide = document.getElementById('btn-close-ios-guide');
+
+  // Check if running in standalone mode (already installed)
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+                       window.navigator.standalone === true || 
+                       document.referrer.includes('android-app://');
+
+  // Check if user is on iOS Safari
+  const isIos = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+  const isSafari = /^((?!chrome|android).)*safari/i.test(window.navigator.userAgent);
+  const isIosSafari = isIos && isSafari;
+
+  // Register Service Worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => {
+          console.log('[PWA] Service Worker registered with scope:', reg.scope);
+        })
+        .catch((err) => {
+          console.warn('[PWA] Service Worker registration failed:', err);
+        });
+    });
+  }
+
+  function showPwaBanner() {
+    if (isStandalone) return;
+    // Check if dismissed in this session
+    if (sessionStorage.getItem('ovrload_pwa_dismissed') === 'true') return;
+    if (pwaInstallBanner) {
+      pwaInstallBanner.style.display = 'block';
+    }
+  }
+
+  function hidePwaBanner(rememberDismissal = false) {
+    if (pwaInstallBanner) {
+      pwaInstallBanner.style.animation = 'fadeIn 0.2s reverse forwards';
+      setTimeout(() => {
+        pwaInstallBanner.style.display = 'none';
+        pwaInstallBanner.style.animation = '';
+      }, 200);
+    }
+    if (rememberDismissal) {
+      sessionStorage.setItem('ovrload_pwa_dismissed', 'true');
+    }
+  }
+
+  function showQuickInstallRow() {
+    if (isStandalone) return;
+    if (pwaInstallRow) {
+      pwaInstallRow.style.display = 'block';
+    }
+  }
+
+  function hideQuickInstallRow() {
+    if (pwaInstallRow) {
+      pwaInstallRow.style.display = 'none';
+    }
+  }
+
+  function triggerInstallFlow() {
+    if (deferredInstallPrompt) {
+      // Chromium / Android / Desktop install prompt
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.then((choiceResult) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('[PWA] User accepted the install prompt');
+          hidePwaBanner(true);
+          hideQuickInstallRow();
+        } else {
+          console.log('[PWA] User dismissed the install prompt');
+        }
+        deferredInstallPrompt = null;
+      });
+    } else if (isIosSafari) {
+      // Show iOS instruction modal
+      if (iosInstallOverlay) {
+        iosInstallOverlay.style.display = 'flex';
+      }
+    } else {
+      // Fallback instructions for unsupported prompt browsers
+      alert('To install OVR LOAD, tap the Install icon in your browser address bar or menu, or select "Add to Home Screen".');
+    }
+  }
+
+  // Handle Chromium / Android / Edge beforeinstallprompt
+  window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent default browser mini-infobar
+    e.preventDefault();
+    deferredInstallPrompt = e;
+
+    if (!isStandalone) {
+      showQuickInstallRow();
+      // Propose installation to client shortly after opening the app
+      setTimeout(() => {
+        showPwaBanner();
+      }, 1200);
+    }
+  });
+
+  // Handle iOS Safari initial proposal
+  if (!isStandalone && isIosSafari) {
+    showQuickInstallRow();
+    setTimeout(() => {
+      showPwaBanner();
+    }, 1500);
+  }
+
+  // Handle successful installation
+  window.addEventListener('appinstalled', () => {
+    console.log('[PWA] OVR LOAD app installed successfully!');
+    hidePwaBanner(true);
+    hideQuickInstallRow();
+    deferredInstallPrompt = null;
+  });
+
+  // Button Event Listeners
+  if (btnPwaBannerInstall) {
+    btnPwaBannerInstall.addEventListener('click', triggerInstallFlow);
+  }
+
+  if (btnPwaQuickInstall) {
+    btnPwaQuickInstall.addEventListener('click', triggerInstallFlow);
+  }
+
+  if (pwaBannerClose) {
+    pwaBannerClose.addEventListener('click', () => hidePwaBanner(true));
+  }
+
+  if (btnPwaBannerDismiss) {
+    btnPwaBannerDismiss.addEventListener('click', () => hidePwaBanner(true));
+  }
+
+  if (btnCloseIosGuide) {
+    btnCloseIosGuide.addEventListener('click', () => {
+      if (iosInstallOverlay) iosInstallOverlay.style.display = 'none';
+    });
+  }
+
+  if (iosInstallOverlay) {
+    iosInstallOverlay.addEventListener('click', (e) => {
+      if (e.target === iosInstallOverlay) {
+        iosInstallOverlay.style.display = 'none';
+      }
+    });
+  }
   
   // Initial loading order
   fetchBranchStatus();
