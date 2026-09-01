@@ -1,21 +1,21 @@
 {
-  "name": "OVR LOAD | Official Menu",
-  "short_name": "OVR LOAD",
-  "description": "Order delicious burgers, meals, and sides directly from OVR LOAD with fast delivery.",
+  "name": "OVRLOAD",
+  "short_name": "OVRLOAD",
+  "description": "Order delicious burgers, meals, and sides directly from OVRLOAD with fast delivery.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "id": "/?source=pwa",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui", "window-controls-overlay"],
   "background_color": "#0a0a0a",
-  "theme_color": "#e66e19",
+  "theme_color": "#eb660c",
   "orientation": "portrait",
   "categories": ["food", "shopping", "lifestyle"],
   "icons": [
     {
-      "src": "/icons/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any"
     },
     {
@@ -25,16 +25,16 @@
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
       "src": "/icons/maskable-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ],
   "shortcuts": [
@@ -42,7 +42,7 @@
       "name": "Browse Menu",
       "short_name": "Menu",
       "url": "/?source=shortcut_menu",
-      "description": "Browse full OVR LOAD food & drinks menu",
+      "description": "Browse full OVRLOAD food & drinks menu",
       "icons": [
         {
           "src": "/icons/icon-192.png",

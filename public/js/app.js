@@ -1270,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       // Fallback instructions for unsupported prompt browsers
-      alert('To install OVR LOAD, tap the Install icon in your browser address bar or menu, or select "Add to Home Screen".');
+      alert('To install OVRLOAD, tap the Install icon in your browser address bar or menu, or select "Add to Home Screen".');
     }
   }
 
@@ -1299,7 +1299,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Handle successful installation
   window.addEventListener('appinstalled', () => {
-    console.log('[PWA] OVR LOAD app installed successfully!');
+    console.log('[PWA] OVRLOAD app installed successfully!');
     hidePwaBanner(true);
     hideQuickInstallRow();
     deferredInstallPrompt = null;
