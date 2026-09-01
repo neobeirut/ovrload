@@ -34,8 +34,53 @@ const pool = new Pool({
   connectionString: SUPABASE_DB_URL,
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+  max: 10,
+  idleTimeoutMillis: 20000,
+  connectionTimeoutMillis: 10000
 });
+
+// Universal Phone Number Normalizer (handles Arabic numerals, 0-prefixes, +961 0..., international)
+function normalizePhone(input) {
+  if (!input) return "";
+
+  // 1. Convert Eastern Arabic numerals (٠-٩) and Persian numerals (۰-۹) to standard ASCII digits
+  let normalized = String(input)
+    .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
+    .replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+
+  // 2. Strip all non-digit characters
+  let digits = normalized.replace(/\D/g, "");
+  if (!digits) return "";
+
+  // 3. Strip international prefix '00'
+  if (digits.startsWith("00")) {
+    digits = digits.slice(2);
+  }
+
+  // 4. Handle Lebanese numbers with country code 961
+  if (digits.startsWith("961")) {
+    let rest = digits.slice(3);
+    // Remove leading zero if entered e.g. +961 03 xxx xxx or +961 070 xxx xxx
+    if (rest.startsWith("0")) {
+      rest = rest.slice(1);
+    }
+    return `961${rest}`;
+  }
+
+  // 5. Handle domestic Lebanese numbers starting with 0 (e.g. 03..., 070..., 071..., 076..., 081..., 01..., etc.)
+  if (digits.startsWith("0")) {
+    return `961${digits.slice(1)}`;
+  }
+
+  // 6. Handle 7 or 8 digit local Lebanese numbers without leading 0 or country code (e.g. 3123456, 70123456, 71123456, 81123456)
+  if (digits.length === 7 || digits.length === 8) {
+    return `961${digits}`;
+  }
+
+  // 7. Otherwise return cleaned digits for international numbers (e.g. 1..., 33..., 971..., etc.)
+  return digits;
+}
 
 
 
@@ -725,10 +770,7 @@ app.patch('/api/orders/:id/status', async (req, res) => {
     const rawPhone = driverPhone || phone;
     let result;
     if (rawPhone) {
-      let target = String(rawPhone).replace(/\D/g, '');
-      if (target.startsWith('00')) target = target.slice(2);
-      if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
-      if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
+      const target = normalizePhone(rawPhone);
 
       result = await client.query(
         `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone, customer_phone`,
@@ -779,10 +821,8 @@ async function sendInfobipOrderNotifications({
   // Helper for sending a message via Text API with Template Fallback
   async function sendMessageSmart(toPhone, multiLineText, singleLineTemplatePlaceholder) {
     if (!toPhone) return;
-    let target = String(toPhone).replace(/\D/g, "");
-    if (target.startsWith("00")) target = target.slice(2);
-    if (target.startsWith("0") && target.length === 8) target = `961${target.slice(1)}`;
-    if (!target.startsWith("961") && target.length >= 7 && target.length <= 8) target = `961${target}`;
+    const target = normalizePhone(toPhone);
+    if (!target) return;
 
     // 1. Try Free-Form Text API (Multi-Line formatted)
     try {
@@ -943,24 +983,19 @@ async function sendInfobipOrderNotifications({
   await sendMessageSmart("96181202607", baseOrderInfo, singleLinePlaceholder);
 
   // 2. Send Order Confirmation to Customer WhatsApp
-  let clientTarget = String(customerPhone || "").replace(/\D/g, "");
-  if (clientTarget.startsWith("00")) clientTarget = clientTarget.slice(2);
-  if (clientTarget.startsWith("0") && clientTarget.length === 8) clientTarget = `961${clientTarget.slice(1)}`;
-  if (!clientTarget.startsWith("961") && clientTarget.length >= 7 && clientTarget.length <= 8) clientTarget = `961${clientTarget}`;
+  const clientTarget = normalizePhone(customerPhone);
 
   if (clientTarget && clientTarget !== "96181202607") {
     const clientConfirmationText = `${baseOrderInfo}\r\n\r\nWe are preparing your items now! Thank you for ordering from OVRLOAD`;
-    await sendMessageSmart(customerPhone, clientConfirmationText, singleLinePlaceholder);
+    await sendMessageSmart(clientTarget, clientConfirmationText, singleLinePlaceholder);
   }
 }
 
 // Helper function to send "Out for Delivery" WhatsApp notification to customer
 async function sendCustomerOutForDeliveryNotification(orderId, customerPhone) {
   if (!customerPhone) return;
-  let target = String(customerPhone).replace(/\D/g, "");
-  if (target.startsWith("00")) target = target.slice(2);
-  if (target.startsWith("0") && target.length === 8) target = `961${target.slice(1)}`;
-  if (!target.startsWith("961") && target.length >= 7 && target.length <= 8) target = `961${target}`;
+  const target = normalizePhone(customerPhone);
+  if (!target) return;
 
   const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
@@ -1081,6 +1116,8 @@ app.post('/api/orders/save', async (req, res) => {
     return res.status(400).json({ error: 'No items in order.' });
   }
 
+  const cleanCustomerPhone = normalizePhone(customerPhone) || customerPhone;
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1110,7 +1147,7 @@ app.post('/api/orders/save', async (req, res) => {
         lat && lng ? String((await getRoadDistanceKm(33.876514, 35.517225, lat, lng)).toFixed(2)) : null,
         deliveryFee || 0,            // delivery_cost_at_order
         customerName || null,        // customer_name
-        customerPhone || null        // customer_phone
+        cleanCustomerPhone || null   // customer_phone
       ]
     );
 
@@ -1144,7 +1181,7 @@ app.post('/api/orders/save', async (req, res) => {
       await sendInfobipOrderNotifications({
         orderId,
         customerName,
-        customerPhone,
+        customerPhone: cleanCustomerPhone,
         deliveryAddress,
         deliveryTime,
         items,
@@ -1288,10 +1325,7 @@ app.post('/api/driver/scan', async (req, res) => {
 
 
     // Normalize phone
-    let target = String(phoneNum).replace(/\D/g, '');
-    if (target.startsWith('00')) target = target.slice(2);
-    if (target.startsWith('0') && target.length === 8) target = '961' + target.slice(1);
-    if (!target.startsWith('961') && target.length >= 7 && target.length <= 8) target = '961' + target;
+    const target = normalizePhone(phoneNum);
 
     // Save driver phone and mark order as completed (picked up) in database
     await client.query("UPDATE orders SET status = 'completed', driver_phone = $1 WHERE id = $2", [target, Number(orderId)]);

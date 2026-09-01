@@ -1073,15 +1073,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const waUrl = getWhatsAppUrl();
 
     // Helper to finish order, reset cart, and show success modal
-    function finishOrderSuccess() {
+    function finishOrderSuccess(url) {
       // Clear cart
       cart = [];
       saveCart();
       renderCart();
       toggleCartDrawer(false);
 
-      // Show success modal on screen
+      // Show success modal on screen with direct WhatsApp button
       const sOverlay = document.getElementById('order-success-overlay');
+      const sLink = document.getElementById('btn-open-whatsapp-direct');
+      if (sLink && url) {
+        sLink.href = url;
+      }
       if (sOverlay) {
         sOverlay.style.display = 'flex';
       }
@@ -1116,13 +1120,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        finishOrderSuccess();
+        finishOrderSuccess(waUrl);
       } else {
         alert('Could not complete order: ' + (data.error || 'Please try again.'));
       }
     } catch (err) {
       console.error('Order save failed:', err);
-      finishOrderSuccess();
+      finishOrderSuccess(waUrl);
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
