@@ -814,6 +814,60 @@ app.patch('/api/orders/:id/status', async (req, res) => {
 });
 
 
+// Generic Helper to send approved Meta WhatsApp Templates via Infobip
+async function sendWhatsAppTemplate({ to, templateName, placeholders, language = "en" }) {
+  if (!to) return null;
+  const target = normalizePhone(to);
+  if (!target) return null;
+
+  const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
+  const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
+  const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
+
+  const cleanPlaceholders = (placeholders || []).map(p =>
+    String(p || "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim()
+  );
+
+  try {
+    const tplRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
+      method: "POST",
+      headers: {
+        "Authorization": `App ${apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            from: sender,
+            to: target,
+            content: {
+              templateName,
+              templateData: {
+                body: {
+                  placeholders: cleanPlaceholders
+                }
+              },
+              language
+            }
+          }
+        ]
+      })
+    });
+    const tplData = await tplRes.json().catch(() => ({}));
+    console.log(`[infobip_template] Sent ${templateName} (${language}) to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
+
+    if (!tplRes.ok && language === "en") {
+      // Fallback with en_US
+      return await sendWhatsAppTemplate({ to, templateName, placeholders, language: "en_US" });
+    }
+    return tplData;
+  } catch (err) {
+    console.error(`[infobip_template] Error sending ${templateName} to ${target}:`, err);
+    return null;
+  }
+}
+
 // Helper function to send automated WhatsApp notifications via Infobip API
 async function sendInfobipOrderNotifications({
   orderId,
@@ -833,7 +887,7 @@ async function sendInfobipOrderNotifications({
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
 
-  // Helper for sending a message via Text API with Template Fallback
+  // Helper for sending a message via Text API with Template Fallback (used for Store/Merchant notification)
   async function sendMessageSmart(toPhone, multiLineText, singleLineTemplatePlaceholder) {
     if (!toPhone) return;
     const target = normalizePhone(toPhone);
@@ -866,82 +920,12 @@ async function sendInfobipOrderNotifications({
       console.warn(`[infobip_dispatch] Text API error for ${target}, falling back to template:`, e.message);
     }
 
-    // 2. Fallback to Approved Template API (Must be single-line without newlines or tabs)
-    const cleanPlaceholder = String(singleLineTemplatePlaceholder || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`)
-      .replace(/[\r\n\t]+/g, " ")
-      .replace(/\s{2,}/g, " ")
-      .trim();
-
-    try {
-      const tplRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
-        method: "POST",
-        headers: {
-          "Authorization": `App ${apiKey}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          messages: [
-            {
-              from: sender,
-              to: target,
-              content: {
-                templateName: "order_confirmation",
-                templateData: {
-                  body: {
-                    placeholders: [
-                      String(orderId),
-                      cleanPlaceholder
-                    ]
-                  }
-                },
-                language: "en"
-              }
-            }
-          ]
-        })
-      });
-      const tplData = await tplRes.json().catch(() => ({}));
-      console.log(`[infobip_dispatch] Template sent to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
-
-      if (!tplRes.ok) {
-        // Fallback retry with en_US if en had a language mismatch
-        try {
-          const fallbackRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
-            method: "POST",
-            headers: {
-              "Authorization": `App ${apiKey}`,
-              "Content-Type": "application/json",
-              "Accept": "application/json"
-            },
-            body: JSON.stringify({
-              messages: [
-                {
-                  from: sender,
-                  to: target,
-                  content: {
-                    templateName: "order_confirmation",
-                    templateData: {
-                      body: {
-                        placeholders: [
-                          String(orderId),
-                          cleanPlaceholder
-                        ]
-                      }
-                    },
-                    language: "en_US"
-                  }
-                }
-              ]
-            })
-          });
-          const fallbackData = await fallbackRes.json().catch(() => ({}));
-          console.log(`[infobip_dispatch] Fallback en_US template sent to ${target}: status=${fallbackRes.status}`, JSON.stringify(fallbackData));
-        } catch (e2) {}
-      }
-    } catch (err) {
-      console.error(`[infobip_dispatch] Template API error for ${target}:`, err);
-    }
+    // 2. Fallback to Template API
+    await sendWhatsAppTemplate({
+      to: target,
+      templateName: "order_confirmation",
+      placeholders: [String(orderId), singleLineTemplatePlaceholder || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`]
+    });
   }
 
   // Multi-line items list matching order layout exactly
@@ -997,12 +981,14 @@ async function sendInfobipOrderNotifications({
   // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
   await sendMessageSmart("96181202607", baseOrderInfo, singleLinePlaceholder);
 
-  // 2. Send Order Confirmation to Customer WhatsApp
+  // 2. Send Order Confirmation Template directly to Customer WhatsApp (guarantees delivery without 24h session requirement)
   const clientTarget = normalizePhone(customerPhone);
-
   if (clientTarget && clientTarget !== "96181202607") {
-    const clientConfirmationText = `${baseOrderInfo}\r\n\r\nWe are preparing your items now! Thank you for ordering from OVRLOAD`;
-    await sendMessageSmart(clientTarget, clientConfirmationText, singleLinePlaceholder);
+    await sendWhatsAppTemplate({
+      to: clientTarget,
+      templateName: "order_confirmation",
+      placeholders: [String(orderId), singleLinePlaceholder]
+    });
   }
 }
 
@@ -1012,102 +998,12 @@ async function sendCustomerOutForDeliveryNotification(orderId, customerPhone) {
   const target = normalizePhone(customerPhone);
   if (!target) return;
 
-  const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
-  const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
-  const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
-
-  // 1. Try Free-Form Text API first if session is active
-  try {
-    const textRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
-      method: "POST",
-      headers: {
-        "Authorization": `App ${apiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        from: sender,
-        to: target,
-        content: { text: `Your order #${orderId} is out for delivery.` }
-      })
-    });
-    const textData = await textRes.json().catch(() => ({}));
-    const statusObj = textData?.status || textData?.messages?.[0]?.status;
-
-    if (textRes.ok && (!statusObj || (statusObj.name !== "REJECTED_NO_SESSION" && statusObj.id !== 7010))) {
-      console.log(`[out_for_delivery] Text API sent to ${target}: status=${textRes.status}`, JSON.stringify(textData));
-      return textData;
-    }
-    console.warn(`[out_for_delivery] Text API rejected for ${target}, falling back to template...`);
-  } catch (e) {
-    console.warn(`[out_for_delivery] Text API error for ${target}, falling back to template:`, e.message);
-  }
-
-  // 2. Fallback to out_for_delivery Template API
-  try {
-    const tplRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
-      method: "POST",
-      headers: {
-        "Authorization": `App ${apiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        messages: [
-          {
-            from: sender,
-            to: target,
-            content: {
-              templateName: "out_for_delivery",
-              templateData: {
-                body: {
-                  placeholders: [String(orderId)]
-                }
-              },
-              language: "en"
-            }
-          }
-        ]
-      })
-    });
-    const tplData = await tplRes.json().catch(() => ({}));
-    console.log(`[out_for_delivery] Template sent to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
-
-    if (!tplRes.ok) {
-      // Fallback with en_US
-      try {
-        const fallbackRes = await fetch(`${baseUrl}/whatsapp/1/message/template`, {
-          method: "POST",
-          headers: {
-            "Authorization": `App ${apiKey}`,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
-          body: JSON.stringify({
-            messages: [
-              {
-                from: sender,
-                to: target,
-                content: {
-                  templateName: "out_for_delivery",
-                  templateData: {
-                    body: {
-                      placeholders: [String(orderId)]
-                    }
-                  },
-                  language: "en_US"
-                }
-              }
-            ]
-          })
-        });
-        const fallbackData = await fallbackRes.json().catch(() => ({}));
-        console.log(`[out_for_delivery] Fallback en_US template sent to ${target}: status=${fallbackRes.status}`, JSON.stringify(fallbackData));
-      } catch (e2) {}
-    }
-  } catch (err) {
-    console.error(`[out_for_delivery] Template API error for ${target}:`, err);
-  }
+  // Direct Meta Template dispatch (bypasses 24h session constraint)
+  await sendWhatsAppTemplate({
+    to: target,
+    templateName: "out_for_delivery",
+    placeholders: [String(orderId)]
+  });
 }
 
 // POST /api/orders/save — Save a WhatsApp order to the database
