@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ovrload-pwa-v2';
+const CACHE_NAME = 'ovrload-pwa-v3';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
