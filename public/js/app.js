@@ -943,7 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Format order description and customer info into WhatsApp format
-  function getWhatsAppUrl() {
+  function getWhatsAppUrl(orderId = null) {
     const name = orderName.value.trim();
     const phone = orderPhone.value.trim();
     const location = orderLocation.value.trim();
@@ -970,7 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
           return c.name;
         });
-        custDesc = `   \u2514 _Options: ${names.join(', ')}_\r\n`;
+        custDesc = `  + ${names.join(', ')}\r\n`;
       }
       itemsText += `* ${item.qty}x ${item.name}\r\n${custDesc}`;
     });
@@ -979,9 +979,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const discountVal = discountPercent > 0 ? (subTotal * (discountPercent / 100)) : 0;
     const totalVal = subTotal - discountVal + effectiveDeliveryFee;
 
-    let text = `NEW ORDER - OVR LOAD\r\n`;
+    const header = orderId ? `NEW ORDER #${orderId} - OVR LOAD\r\n` : `NEW ORDER - OVR LOAD\r\n`;
+    let text = header;
     text += `================================\r\n\r\n`;
     text += `Customer Details:\r\n`;
+    if (orderId) {
+      text += `* Order ID: #${orderId}\r\n`;
+    }
     text += `* Name: ${name}\r\n`;
     text += `* Phone: ${phone}\r\n`;
     text += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
@@ -1005,7 +1009,8 @@ document.addEventListener('DOMContentLoaded', () => {
       text += `* WhatsApp Discount (${discountPercent}%): -$${discountVal.toFixed(2)}\r\n`;
     }
     text += `* Delivery Fee: $${effectiveDeliveryFee.toFixed(2)}\r\n`;
-    text += `* Total Amount: $${totalVal.toFixed(2)}`;
+    text += `* Total Amount: $${totalVal.toFixed(2)}\r\n\r\n`;
+    text += `We are preparing your items now! Thank you for ordering from OVRLOAD`;
 
     return `https://wa.me/96181202607?text=${encodeURIComponent(text)}`;
   }
@@ -1070,9 +1075,9 @@ document.addEventListener('DOMContentLoaded', () => {
       submitBtn.innerText = 'Placing Order...';
     }
 
-    const waUrl = getWhatsAppUrl();
+    const initialWaUrl = getWhatsAppUrl();
 
-    // Helper to finish order, reset cart, and show success modal
+    // Helper to finish order, reset cart, show success modal, and redirect to WhatsApp
     function finishOrderSuccess(url) {
       // Clear cart
       cart = [];
@@ -1088,6 +1093,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (sOverlay) {
         sOverlay.style.display = 'flex';
+      }
+
+      // Automatically navigate to WhatsApp with the complete pre-filled receipt
+      if (url) {
+        window.location.href = url;
       }
     }
 
@@ -1120,13 +1130,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        finishOrderSuccess(waUrl);
+        const directWaUrl = getWhatsAppUrl(data.orderId);
+        finishOrderSuccess(directWaUrl);
       } else {
         alert('Could not complete order: ' + (data.error || 'Please try again.'));
       }
     } catch (err) {
       console.error('Order save failed:', err);
-      finishOrderSuccess(waUrl);
+      finishOrderSuccess(initialWaUrl);
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;

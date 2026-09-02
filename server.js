@@ -976,19 +976,18 @@ async function sendInfobipOrderNotifications({
   baseOrderInfo += `* Total Amount: $${Number(total || 0).toFixed(2)}`;
 
   const singleLineItemsSummary = (items || []).map(i => `${i.qty || 1}x ${i.name || "Item"}`).join(", ");
-  const singleLinePlaceholder = `OVR LOAD (${singleLineItemsSummary} • Total: $${Number(total || 0).toFixed(2)})`;
+  const cleanTemplateLocation = `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`;
+  const clientConfirmationText = `${baseOrderInfo}\r\n\r\nWe are preparing your items now! Thank you for ordering from OVRLOAD`;
 
   // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
-  await sendMessageSmart("96181202607", baseOrderInfo, singleLinePlaceholder);
+  await sendMessageSmart("96181202607", baseOrderInfo, cleanTemplateLocation);
 
-  // 2. Send Order Confirmation Template directly to Customer WhatsApp (guarantees delivery without 24h session requirement)
+  // 2. Send Order Confirmation to Customer WhatsApp:
+  // Attempts to send the full order receipt (multi-line) if a 24h WhatsApp session is active.
+  // Falls back to approved Infobip template if outside 24h window (preventing 7010 errors).
   const clientTarget = normalizePhone(customerPhone);
   if (clientTarget && clientTarget !== "96181202607") {
-    await sendWhatsAppTemplate({
-      to: clientTarget,
-      templateName: "order_confirmation",
-      placeholders: [String(orderId), singleLinePlaceholder]
-    });
+    await sendMessageSmart(clientTarget, clientConfirmationText, cleanTemplateLocation);
   }
 }
 
