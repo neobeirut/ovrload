@@ -91,7 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (userCoords) {
         recalculateDelivery(userCoords.lat, userCoords.lng);
       } else {
-        loadOrderSettings();
+        deliveryCost = 0.00;
+        renderCart();
       }
     });
   }
@@ -205,8 +206,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch('api/order-settings');
       if (res.ok) {
         const settings = await res.json();
-        deliveryCost = settings.deliveryCost;
         discountPercent = settings.discountPercent;
+        if (orderType === 'delivery' && userCoords) {
+          recalculateDelivery(userCoords.lat, userCoords.lng);
+        } else {
+          deliveryCost = 0.00;
+        }
         renderCart();
       }
     } catch (err) {
@@ -728,7 +733,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (orderType === 'pickup') {
       cartDeliveryVal.textContent = '$0.00 (Pickup)';
     } else if (deliveryCost === 0) {
-      cartDeliveryVal.textContent = '$0.00 (Pin location)';
+      cartDeliveryVal.textContent = '$0.00';
     } else {
       cartDeliveryVal.textContent = `$${deliveryCost.toFixed(2)}`;
     }
@@ -851,7 +856,8 @@ document.addEventListener('DOMContentLoaded', () => {
           Pin GPS Location
         `;
       }
-      loadOrderSettings();
+      deliveryCost = 0.00;
+      renderCart();
     }
   });
 
