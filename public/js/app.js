@@ -91,8 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (userCoords) {
         recalculateDelivery(userCoords.lat, userCoords.lng);
       } else {
-        deliveryCost = 0.00;
-        renderCart();
+        loadOrderSettings();
       }
     });
   }
@@ -1039,8 +1038,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (orderType === 'delivery') {
-      if (!userCoords || !orderLocation.value.includes('[Maps Pin:')) {
-        alert("Please click 'Pin GPS Location' to share your exact location on Google Maps. A pinned GPS location is required for delivery.");
+      const addressText = orderLocation ? orderLocation.value.trim() : '';
+      if (!addressText) {
+        alert("Please enter your delivery address.");
+        if (orderLocation) orderLocation.focus();
         return;
       }
     }
