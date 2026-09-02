@@ -1082,29 +1082,22 @@ document.addEventListener('DOMContentLoaded', () => {
       submitBtn.innerText = 'Placing Order...';
     }
 
-    const initialWaUrl = getWhatsAppUrl();
-
-    // Helper to finish order, reset cart, show success modal, and redirect to WhatsApp
-    function finishOrderSuccess(url) {
+    // Helper to finish order, reset cart, and show success modal on screen
+    function finishOrderSuccess(orderId) {
       // Clear cart
       cart = [];
       saveCart();
       renderCart();
       toggleCartDrawer(false);
 
-      // Show success modal on screen with direct WhatsApp button
+      // Show success modal on screen
       const sOverlay = document.getElementById('order-success-overlay');
-      const sLink = document.getElementById('btn-open-whatsapp-direct');
-      if (sLink && url) {
-        sLink.href = url;
+      const sMsg = document.getElementById('order-success-msg');
+      if (sMsg && orderId) {
+        sMsg.textContent = `Your order #${orderId} has been sent to our kitchen! We have sent a confirmation message to your WhatsApp.`;
       }
       if (sOverlay) {
         sOverlay.style.display = 'flex';
-      }
-
-      // Automatically navigate to WhatsApp with the complete pre-filled receipt
-      if (url) {
-        window.location.href = url;
       }
     }
 
@@ -1137,14 +1130,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
-        const directWaUrl = getWhatsAppUrl(data.orderId);
-        finishOrderSuccess(directWaUrl);
+        finishOrderSuccess(data.orderId);
       } else {
         alert('Could not complete order: ' + (data.error || 'Please try again.'));
       }
     } catch (err) {
       console.error('Order save failed:', err);
-      finishOrderSuccess(initialWaUrl);
+      alert('Could not complete order. Please check your internet connection and try again.');
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
