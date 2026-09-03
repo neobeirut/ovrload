@@ -762,10 +762,16 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/orders/:id/status — update order status (e.g. mark as delivered or reverse to preparing)
-// No auth required — driver marks orders as picked up from Android
-app.patch('/api/orders/:id/status', async (req, res) => {
-  const { status, driverPhone, phone } = req.body;
+// Status update paths supported for POS, driver, and admin
+const statusUpdatePaths = [
+  '/api/orders/:id/status',
+  '/api/orders/:id',
+  '/api/pos/orders/:id/status',
+  '/api/pos/orders/:id'
+];
+
+async function handleOrderStatusUpdate(req, res) {
+  const { status, driverPhone, phone, customerPhone } = req.body;
   const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
@@ -800,8 +806,15 @@ app.patch('/api/orders/:id/status', async (req, res) => {
     if (!result.rows.length) return res.status(404).json({ error: 'Order not found' });
 
     const updatedOrder = result.rows[0];
-    if (status === 'completed' && updatedOrder.customer_phone) {
-      await sendCustomerOutForDeliveryNotification(updatedOrder.id, updatedOrder.customer_phone);
+    const targetCustomerPhone = updatedOrder.customer_phone || customerPhone;
+
+    // Send "We are preparing your items now!" when confirmed from the POS
+    if ((status === 'confirmed' || status === 'preparing') && targetCustomerPhone) {
+      await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
+    }
+
+    if (status === 'completed' && targetCustomerPhone) {
+      await sendCustomerOutForDeliveryNotification(updatedOrder.id, targetCustomerPhone);
     }
 
     res.json({ success: true, order: updatedOrder });
@@ -811,7 +824,11 @@ app.patch('/api/orders/:id/status', async (req, res) => {
   } finally {
     client.release();
   }
-});
+}
+
+app.patch(statusUpdatePaths, handleOrderStatusUpdate);
+app.post(statusUpdatePaths, handleOrderStatusUpdate);
+app.put(statusUpdatePaths, handleOrderStatusUpdate);
 
 
 // Generic Helper to send approved Meta WhatsApp Templates via Infobip
@@ -976,8 +993,8 @@ async function sendInfobipOrderNotifications({
   baseOrderInfo += `* Total Amount: $${Number(total || 0).toFixed(2)}`;
 
   const singleLineItemsSummary = (items || []).map(i => `${i.qty || 1}x ${i.name || "Item"}`).join(", ");
-  const cleanTemplateLocation = `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`;
-  const clientConfirmationText = `${baseOrderInfo}\r\n\r\nWe are preparing your items now! Thank you for ordering from OVRLOAD`;
+  const cleanTemplateLocation = "OVR LOAD";
+  const clientConfirmationText = `${baseOrderInfo}\r\n\r\nYour order #${orderId} has been received at OVR LOAD. and is awaiting confirmation!\r\nThank you for ordering from OVRLOAD`;
 
   // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
   await sendMessageSmart("96181202607", baseOrderInfo, cleanTemplateLocation);
@@ -989,6 +1006,56 @@ async function sendInfobipOrderNotifications({
   if (clientTarget && clientTarget !== "96181202607") {
     await sendMessageSmart(clientTarget, clientConfirmationText, cleanTemplateLocation);
   }
+}
+
+// Helper function to send "We are preparing your items now!" WhatsApp notification to customer via Infobip template
+async function sendCustomerPreparingNotification(orderId, customerPhone) {
+  if (!customerPhone) return null;
+  const target = normalizePhone(customerPhone);
+  if (!target) return null;
+
+  console.log(`[preparing_notification] Sending order_preparing WhatsApp to customer ${target} for order #${orderId}`);
+
+  // 1. Direct Meta Template dispatch (order_preparing)
+  let result = await sendWhatsAppTemplate({
+    to: target,
+    templateName: "order_preparing",
+    placeholders: []
+  });
+
+  // If template without placeholders is rejected, fallback with orderId
+  if (!result || !result.ok) {
+    result = await sendWhatsAppTemplate({
+      to: target,
+      templateName: "order_preparing",
+      placeholders: [String(orderId)]
+    });
+  }
+
+  // 2. Also send free-form message as backup if session is active
+  try {
+    const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
+    const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
+    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
+
+    await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+      method: "POST",
+      headers: {
+        "Authorization": `App ${apiKey}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        from: sender,
+        to: target,
+        content: { text: "We are preparing your items now!" }
+      })
+    });
+  } catch (e) {
+    // Non-fatal
+  }
+
+  return result;
 }
 
 // Helper function to send "Out for Delivery" WhatsApp notification to customer
