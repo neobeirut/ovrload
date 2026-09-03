@@ -788,6 +788,14 @@ async function handleOrderStatusUpdate(req, res) {
       }
     }
 
+    // Fetch previous status to prevent duplicate notifications
+    const prevRes = await client.query(
+      "SELECT status, customer_phone FROM orders WHERE id = $1",
+      [Number(req.params.id)]
+    );
+    if (!prevRes.rows.length) return res.status(404).json({ error: 'Order not found' });
+    const prevStatus = prevRes.rows[0].status;
+
     const rawPhone = driverPhone || phone;
     let result;
     if (rawPhone) {
@@ -808,12 +816,12 @@ async function handleOrderStatusUpdate(req, res) {
     const updatedOrder = result.rows[0];
     const targetCustomerPhone = updatedOrder.customer_phone || customerPhone;
 
-    // Send "We are preparing your items now!" when confirmed from the POS
-    if ((status === 'confirmed' || status === 'preparing') && targetCustomerPhone) {
+    // Send "We are preparing your items now!" when confirmed from the POS (only once on transition)
+    if ((status === 'confirmed' || status === 'preparing') && prevStatus !== 'preparing' && prevStatus !== 'confirmed' && targetCustomerPhone) {
       await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
     }
 
-    if (status === 'completed' && targetCustomerPhone) {
+    if (status === 'completed' && prevStatus !== 'completed' && targetCustomerPhone) {
       await sendCustomerOutForDeliveryNotification(updatedOrder.id, targetCustomerPhone);
     }
 
@@ -1016,7 +1024,7 @@ async function sendCustomerPreparingNotification(orderId, customerPhone) {
 
   console.log(`[preparing_notification] Sending order_preparing WhatsApp to customer ${target} for order #${orderId}`);
 
-  // 1. Direct Meta Template dispatch (order_preparing)
+  // Direct Meta Template dispatch (order_preparing) - sends exactly one message
   let result = await sendWhatsAppTemplate({
     to: target,
     templateName: "order_preparing",
@@ -1030,29 +1038,6 @@ async function sendCustomerPreparingNotification(orderId, customerPhone) {
       templateName: "order_preparing",
       placeholders: [String(orderId)]
     });
-  }
-
-  // 2. Also send free-form message as backup if session is active
-  try {
-    const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
-    const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
-    const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
-
-    await fetch(`${baseUrl}/whatsapp/1/message/text`, {
-      method: "POST",
-      headers: {
-        "Authorization": `App ${apiKey}`,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        from: sender,
-        to: target,
-        content: { text: "We are preparing your items now!" }
-      })
-    });
-  } catch (e) {
-    // Non-fatal
   }
 
   return result;
