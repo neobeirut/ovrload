@@ -762,12 +762,12 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Status update paths supported for POS, driver, and admin
+// Status update paths supported for POS, driver, and admin (constrained to numeric IDs to never collide with /api/orders/save)
 const statusUpdatePaths = [
-  '/api/orders/:id/status',
-  '/api/orders/:id',
-  '/api/pos/orders/:id/status',
-  '/api/pos/orders/:id'
+  '/api/orders/:id(\\d+)/status',
+  '/api/orders/:id(\\d+)',
+  '/api/pos/orders/:id(\\d+)/status',
+  '/api/pos/orders/:id(\\d+)'
 ];
 
 async function handleOrderStatusUpdate(req, res) {
