@@ -989,7 +989,7 @@ async function sendInfobipOrderNotifications({
   }
 
   // Base Order Info Layout
-  let baseOrderInfo = `NEW ORDER #${orderId} - OVR LOAD\r\n`;
+  let baseOrderInfo = `NEW ORDER #${orderId} - OVRLOAD\r\n`;
   baseOrderInfo += `================================\r\n\r\n`;
   baseOrderInfo += `Customer Details:\r\n`;
   baseOrderInfo += `* Order ID: #${orderId}\r\n`;
@@ -1016,13 +1016,13 @@ async function sendInfobipOrderNotifications({
   baseOrderInfo += `* Delivery Fee: $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
   baseOrderInfo += `* Total Amount: $${Number(total || 0).toFixed(2)}`;
 
-  const clientConfirmationText = `${baseOrderInfo}\r\n\r\nYour order #${orderId} has been received at OVR LOAD. and is awaiting confirmation!\r\nThank you for ordering from OVRLOAD`;
+  const clientConfirmationText = `${baseOrderInfo}\r\n\r\nYour order #${orderId} has been received at OVRLOAD and is awaiting confirmation!\r\nThank you for ordering from OVRLOAD`;
 
   // 1. Send Customer Order Confirmation
   const clientTarget = normalizePhone(customerPhone);
   if (clientTarget && clientTarget !== sender) {
     // A. ALWAYS send the pre-approved Meta Template (guaranteed delivery outside 24h session)
-    const summaryPlaceholder = `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`;
+    const summaryPlaceholder = `OVRLOAD • Total: $${Number(total || 0).toFixed(2)}`;
     try {
       const templateResult = await sendWhatsAppTemplate({
         to: clientTarget,
