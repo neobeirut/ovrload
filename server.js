@@ -1427,7 +1427,7 @@ app.post('/api/driver/scan', async (req, res) => {
 
     const deliveryFee = Number(order.delivery_fee || order.delivery_cost_at_order || 0);
 
-    const driverText = '🛵 OVR LOAD DELIVERY'
+    const driverText = '🛵 OVRLOAD DELIVERY'
       + ' | Order #' + order.id
       + ' | ' + (order.customer_name || '-')
       + ' | ' + (order.customer_phone || 'N/A')
