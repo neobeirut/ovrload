@@ -969,47 +969,6 @@ async function sendInfobipOrderNotifications({
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
   const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
 
-  // Helper for sending a message via Text API with Template Fallback (used for Store/Merchant notification)
-  async function sendMessageSmart(toPhone, multiLineText, singleLineTemplatePlaceholder) {
-    if (!toPhone) return;
-    const target = normalizePhone(toPhone);
-    if (!target) return;
-
-    // 1. Try Free-Form Text API (Multi-Line formatted)
-    try {
-      const textRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
-        method: "POST",
-        headers: {
-          "Authorization": `App ${apiKey}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          from: sender,
-          to: target,
-          content: { text: multiLineText }
-        })
-      });
-      const textData = await textRes.json().catch(() => ({}));
-      const statusObj = textData?.status || textData?.messages?.[0]?.status;
-
-      if (textRes.ok && (!statusObj || (statusObj.name !== "REJECTED_NO_SESSION" && statusObj.id !== 7010))) {
-        console.log(`[infobip_dispatch] Multi-line text sent successfully to ${target}: status=${textRes.status}`, JSON.stringify(textData));
-        return textData;
-      }
-      console.warn(`[infobip_dispatch] Text API rejected for ${target} (${statusObj?.name || "No session"}), falling back to template...`);
-    } catch (e) {
-      console.warn(`[infobip_dispatch] Text API error for ${target}, falling back to template:`, e.message);
-    }
-
-    // 2. Fallback to Template API
-    await sendWhatsAppTemplate({
-      to: target,
-      templateName: "order_confirmation",
-      placeholders: [String(orderId), singleLineTemplatePlaceholder || `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`]
-    });
-  }
-
   // Multi-line items list matching order layout exactly
   let itemsText = "";
   (items || []).forEach((item) => {
@@ -1057,19 +1016,84 @@ async function sendInfobipOrderNotifications({
   baseOrderInfo += `* Delivery Fee: $${Number(deliveryFee || 0).toFixed(2)}\r\n`;
   baseOrderInfo += `* Total Amount: $${Number(total || 0).toFixed(2)}`;
 
-  const singleLineItemsSummary = (items || []).map(i => `${i.qty || 1}x ${i.name || "Item"}`).join(", ");
-  const cleanTemplateLocation = "OVR LOAD";
   const clientConfirmationText = `${baseOrderInfo}\r\n\r\nYour order #${orderId} has been received at OVR LOAD. and is awaiting confirmation!\r\nThank you for ordering from OVRLOAD`;
 
-  // 1. Send Order to OVR LOAD Store WhatsApp (96181202607)
-  await sendMessageSmart("96181202607", baseOrderInfo, cleanTemplateLocation);
-
-  // 2. Send Order Confirmation to Customer WhatsApp:
-  // Attempts to send the full order receipt (multi-line) if a 24h WhatsApp session is active.
-  // Falls back to approved Infobip template if outside 24h window (preventing 7010 errors).
+  // 1. Send Customer Order Confirmation
   const clientTarget = normalizePhone(customerPhone);
-  if (clientTarget && clientTarget !== "96181202607") {
-    await sendMessageSmart(clientTarget, clientConfirmationText, cleanTemplateLocation);
+  if (clientTarget && clientTarget !== sender) {
+    // A. ALWAYS send the pre-approved Meta Template (guaranteed delivery outside 24h session)
+    const summaryPlaceholder = `OVR LOAD • Total: $${Number(total || 0).toFixed(2)}`;
+    try {
+      const templateResult = await sendWhatsAppTemplate({
+        to: clientTarget,
+        templateName: "order_confirmation",
+        placeholders: [String(orderId), summaryPlaceholder]
+      });
+      console.log(`[infobip_dispatch] Sent order_confirmation template to customer ${clientTarget} for order #${orderId}:`, templateResult?.messages?.[0]?.status?.name || templateResult?.status);
+    } catch (tplErr) {
+      console.error(`[infobip_dispatch] Error sending order_confirmation template to ${clientTarget}:`, tplErr);
+    }
+
+    // B. Check if customer has an active 24h inbound session in database before sending free-form text
+    let hasActiveSession = false;
+    try {
+      const sessRes = await pool.query(
+        `SELECT id FROM customer_whatsapp_messages 
+         WHERE phone = $1 AND direction = 'inbound' AND created_at > NOW() - INTERVAL '24 hours' 
+         LIMIT 1;`,
+        [clientTarget]
+      );
+      hasActiveSession = sessRes.rows.length > 0;
+    } catch (sessionErr) {
+      hasActiveSession = false;
+    }
+
+    // Only send the detailed free-form receipt if a session is actively open to avoid code 7010
+    if (hasActiveSession) {
+      console.log(`[infobip_dispatch] Active 24h session found for ${clientTarget}, dispatching detailed receipt...`);
+      try {
+        await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+          method: "POST",
+          headers: {
+            "Authorization": `App ${apiKey}`,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            from: sender,
+            to: clientTarget,
+            content: { text: clientConfirmationText }
+          })
+        });
+      } catch (freeFormErr) {
+        console.warn(`[infobip_dispatch] Free-form receipt error for ${clientTarget}:`, freeFormErr.message);
+      }
+    } else {
+      console.log(`[infobip_dispatch] No active session for ${clientTarget}; suppressed free-form text to prevent error 7010.`);
+    }
+  }
+
+  // 2. Send Store / Kitchen WhatsApp Notification
+  const storeNotificationPhone = normalizePhone(process.env.STORE_NOTIFICATION_PHONE || process.env.KITCHEN_NOTIFICATION_PHONE || "");
+  if (storeNotificationPhone && storeNotificationPhone !== sender) {
+    console.log(`[infobip_dispatch] Sending new order notification to store phone: ${storeNotificationPhone}`);
+    try {
+      await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+        method: "POST",
+        headers: {
+          "Authorization": `App ${apiKey}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          from: sender,
+          to: storeNotificationPhone,
+          content: { text: baseOrderInfo }
+        })
+      });
+    } catch (storeErr) {
+      console.warn(`[infobip_dispatch] Store notification error to ${storeNotificationPhone}:`, storeErr.message);
+    }
   }
 }
 
