@@ -882,6 +882,10 @@ async function handleOrderStatusUpdate(req, res) {
       }
     }
 
+    if (status === 'cancelled' && prevStatus !== 'cancelled' && targetCustomerPhone) {
+      await sendCustomerCancelledNotification(updatedOrder.id, targetCustomerPhone);
+    }
+
     res.json({ success: true, order: updatedOrder });
   } catch (err) {
     console.error('Error updating order status:', err);
@@ -1141,6 +1145,20 @@ async function sendCustomerOutForDeliveryNotification(orderId, customerPhone) {
   await sendWhatsAppTemplate({
     to: target,
     templateName: "out_for_delivery",
+    placeholders: [String(orderId)]
+  });
+}
+
+// Helper function to send "rejected_order" WhatsApp notification to customer
+async function sendCustomerCancelledNotification(orderId, customerPhone) {
+  if (!customerPhone) return;
+  const target = normalizePhone(customerPhone);
+  if (!target) return;
+
+  console.log(`[cancelled_notification] Sending rejected_order WhatsApp to customer ${target} for order #${orderId}`);
+  return await sendWhatsAppTemplate({
+    to: target,
+    templateName: "rejected_order",
     placeholders: [String(orderId)]
   });
 }
