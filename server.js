@@ -770,6 +770,55 @@ const statusUpdatePaths = [
   '/api/pos/orders/:id(\\d+)'
 ];
 
+// ── Beirut Time & Operational Hours Helpers ─────────────────────────────────
+// Kitchen opening hours: Monday–Saturday: 12:00 PM to 11:00 PM (Asia/Beirut). Sunday: Closed.
+// Allow dispatch window from 11:00 AM until 11:30 PM (allows order pickup right before closing).
+// Between 11:30 PM and 11:00 AM, driver dispatches & automated WhatsApp notifications are blocked.
+function isKitchenOpenForDispatch(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Beirut',
+    weekday: 'long',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+    hourCycle: 'h23'
+  });
+  const parts = formatter.formatToParts(date);
+  const getPart = (t) => parts.find(p => p.type === t)?.value;
+  const weekday = getPart('weekday');
+  const hour = parseInt(getPart('hour'), 10);
+  const minute = parseInt(getPart('minute'), 10);
+
+  if (weekday === 'Sunday') {
+    return { allowed: false, reason: 'Kitchen is closed on Sundays' };
+  }
+  if (hour < 11) {
+    return { allowed: false, reason: `Kitchen is closed (opens at 12:00 PM Beirut time). Current hour: ${hour}:${String(minute).padStart(2, '0')}` };
+  }
+  if (hour > 23 || (hour === 23 && minute >= 30)) {
+    return { allowed: false, reason: `Kitchen closed at 11:00 PM Beirut time. Dispatch cutoff is 11:30 PM. Current time: ${hour}:${String(minute).padStart(2, '0')}` };
+  }
+  return { allowed: true };
+}
+
+function isOrderFromToday(createdAt, now = new Date()) {
+  if (!createdAt) return false;
+  const orderDate = new Date(createdAt);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Beirut',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  return formatter.format(orderDate) === formatter.format(now);
+}
+
+function isOrderTooOld(createdAt, maxHours = 4, now = new Date()) {
+  if (!createdAt) return true;
+  const orderTime = new Date(createdAt).getTime();
+  return (now.getTime() - orderTime) > maxHours * 60 * 60 * 1000;
+}
+
 async function handleOrderStatusUpdate(req, res) {
   const { status, driverPhone, phone, customerPhone } = req.body;
   const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'];
@@ -802,12 +851,12 @@ async function handleOrderStatusUpdate(req, res) {
       const target = normalizePhone(rawPhone);
 
       result = await client.query(
-        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone, customer_phone`,
+        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone, customer_phone, created_at`,
         [status, target, Number(req.params.id)]
       );
     } else {
       result = await client.query(
-        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone, customer_phone`,
+        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone, customer_phone, created_at`,
         [status, Number(req.params.id)]
       );
     }
@@ -818,11 +867,19 @@ async function handleOrderStatusUpdate(req, res) {
 
     // Send "We are preparing your items now!" when confirmed from the POS (only once on transition)
     if ((status === 'confirmed' || status === 'preparing') && prevStatus !== 'preparing' && prevStatus !== 'confirmed' && targetCustomerPhone) {
-      await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
+      if (isOrderFromToday(updatedOrder.created_at)) {
+        await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
+      }
     }
 
     if (status === 'completed' && prevStatus !== 'completed' && targetCustomerPhone) {
-      await sendCustomerOutForDeliveryNotification(updatedOrder.id, targetCustomerPhone);
+      const kitchenCheck = isKitchenOpenForDispatch();
+      const isToday = isOrderFromToday(updatedOrder.created_at);
+      if (kitchenCheck.allowed && isToday && !isOrderTooOld(updatedOrder.created_at, 6)) {
+        await sendCustomerOutForDeliveryNotification(updatedOrder.id, targetCustomerPhone);
+      } else {
+        console.warn(`[order_status] Suppressed out_for_delivery for order #${updatedOrder.id} (kitchen open: ${kitchenCheck.allowed}, isToday: ${isToday})`);
+      }
     }
 
     res.json({ success: true, order: updatedOrder });
@@ -1049,6 +1106,13 @@ async function sendCustomerOutForDeliveryNotification(orderId, customerPhone) {
   const target = normalizePhone(customerPhone);
   if (!target) return;
 
+  // Safeguard: Never send out for delivery notifications during off-hours
+  const kitchenCheck = isKitchenOpenForDispatch();
+  if (!kitchenCheck.allowed) {
+    console.warn(`[whatsapp] Blocked out_for_delivery for order #${orderId} to ${target}: ${kitchenCheck.reason}`);
+    return;
+  }
+
   // Direct Meta Template dispatch (bypasses 24h session constraint)
   await sendWhatsAppTemplate({
     to: target,
@@ -1199,18 +1263,24 @@ app.get('/driver/scan', (req, res) => {
     '<div data-s="form" class="on">',
     '<h2>&#x1F6F5; Delivery Order</h2>',
     '<div class="oid">#<span id="o1"></span></div>',
-    '<p>Enter your number once to receive delivery details on WhatsApp automatically every time.</p>',
+    '<p>Enter your phone number once to receive delivery details on WhatsApp.</p>',
     '<input type="tel" id="ph" placeholder="e.g. 70 123 456" inputmode="tel" />',
     '<div class="err" id="er">Please enter a valid phone number.</div>',
     '<button class="btn" id="sb" onclick="send()">&#x1F4F2; Send to my WhatsApp</button>',
     '</div>',
-    '<div data-s="auto">',
-    '<div class="spinner"></div>',
+    '<div data-s="confirm">',
     '<h2>&#x1F6F5; Delivery Order</h2>',
     '<div class="oid">#<span id="o2"></span></div>',
-    '<div id="an" style="font-weight:700;margin-bottom:6px;"></div>',
-    '<div class="sub">Sending order details to your WhatsApp...</div>',
-    '<button class="chg" onclick="chg()">Not you? Change number</button>',
+    '<p style="margin-bottom:8px;">Ready to pick up this order?</p>',
+    '<div id="an" style="font-size:1.1rem;font-weight:700;color:#25d366;margin-bottom:16px;"></div>',
+    '<button class="btn" id="cb" onclick="confirmDispatch()">&#x1F6F5; Confirm Pick Up &amp; Dispatch</button>',
+    '<div style="margin-top:14px;"><button class="chg" onclick="chg()">Not you? Change number</button></div>',
+    '</div>',
+    '<div data-s="loading">',
+    '<div class="spinner"></div>',
+    '<h2>&#x1F6F5; Delivery Order</h2>',
+    '<div class="oid">#<span id="o-load"></span></div>',
+    '<div class="sub">Dispatching delivery details...</div>',
     '</div>',
     '<div data-s="done">',
     '<div class="ok-icon" id="done-icon">&#x2705;</div>',
@@ -1226,12 +1296,17 @@ app.get('/driver/scan', (req, res) => {
     'document.getElementById("o1").textContent=oid;',
     'document.getElementById("o2").textContent=oid;',
     'document.getElementById("o3").textContent=oid;',
-    'function show(n){document.querySelectorAll("[data-s]").forEach(function(e){e.classList.remove("on")});document.querySelector("[data-s="+n+"]").classList.add("on")}',
+    'document.getElementById("o-load").textContent=oid;',
+    'function show(n){document.querySelectorAll("[data-s]").forEach(function(e){e.classList.remove("on")});var el=document.querySelector("[data-s="+n+"]");if(el)el.classList.add("on");}',
     'var KEY="ovrload_driver_phone",sv=localStorage.getItem(KEY);',
-    'if(sv&&oid!="?"){document.getElementById("an").textContent=sv;show("auto");go(sv);}',
+    'if(oid=="?"||!oid){show("form");document.getElementById("er").textContent="No order specified in QR code.";document.getElementById("er").style.display="block";document.getElementById("sb").disabled=true;}',
+    'else if(sessionStorage.getItem("ovr_dispatched_"+oid)){show("done");document.getElementById("done-icon").textContent="\u2705";document.getElementById("done-title").textContent="Already Dispatched";document.getElementById("done-msg").textContent="Order #"+oid+" was already dispatched.";}',
+    'else if(sv){document.getElementById("an").textContent=sv;show("confirm");}',
+    'else{show("form");}',
+    'function confirmDispatch(){document.getElementById("cb").disabled=true;show("loading");go(sv);}',
     'function chg(){localStorage.removeItem(KEY);show("form");}',
-    'function send(){var v=document.getElementById("ph").value.trim();if(!v||v.length<5){document.getElementById("er").style.display="block";return;}document.getElementById("er").style.display="none";document.getElementById("sb").disabled=true;document.getElementById("sb").textContent="Sending...";localStorage.setItem(KEY,v);go(v);}',
-    'function go(phone){fetch("/api/driver/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:oid,driverPhone:phone})}).then(function(r){return r.json();}).then(function(d){show("done");if(d.sentVia){document.getElementById("done-icon").textContent="\u2705";document.getElementById("done-title").textContent="Sent to WhatsApp!";document.getElementById("done-msg").textContent="Check WhatsApp for your delivery details."}else{document.getElementById("done-icon").textContent="\uD83D\uDCCB";document.getElementById("done-title").textContent="Delivery Details";document.getElementById("done-msg").textContent="";if(d.orderDetails){var od=d.orderDetails;var el=document.getElementById("order-details");el.style.display="block";el.innerHTML="<b>Order #"+od.id+"</b><br>Customer: "+od.customerName+"<br>Phone: "+od.customerPhone+"<br>Address: "+od.address+"<br><br><b>Items:</b><br>"+od.items+"<br><br><b>Collect: $"+od.total+"</b>"}}}).catch(function(){show("done");});}',
+    'function send(){var v=document.getElementById("ph").value.trim();if(!v||v.length<5){document.getElementById("er").style.display="block";return;}document.getElementById("er").style.display="none";document.getElementById("sb").disabled=true;document.getElementById("sb").textContent="Sending...";localStorage.setItem(KEY,v);sv=v;show("loading");go(v);}',
+    'function go(phone){fetch("/api/driver/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({orderId:oid,driverPhone:phone})}).then(function(r){return r.json();}).then(function(d){show("done");sessionStorage.setItem("ovr_dispatched_"+oid,"1");try{window.history.replaceState({},"",location.pathname);}catch(e){}if(d.alreadyDispatched||d.alreadyCompleted){document.getElementById("done-icon").textContent="\u2139\uFE0F";document.getElementById("done-title").textContent="Already Completed";document.getElementById("done-msg").textContent=d.message||"This order was already dispatched.";}else if(d.error){document.getElementById("done-icon").textContent="\u26A0\uFE0F";document.getElementById("done-title").textContent="Notice";document.getElementById("done-msg").textContent=d.error;}else if(d.sentVia){document.getElementById("done-icon").textContent="\u2705";document.getElementById("done-title").textContent="Sent to WhatsApp!";document.getElementById("done-msg").textContent="Check WhatsApp for delivery details.";}else{document.getElementById("done-icon").textContent="\uD83D\uDCCB";document.getElementById("done-title").textContent="Delivery Details";document.getElementById("done-msg").textContent="";}if(d.orderDetails){var od=d.orderDetails;var el=document.getElementById("order-details");el.style.display="block";el.innerHTML="<b>Order #"+od.id+"</b><br>Customer: "+od.customerName+"<br>Phone: "+od.customerPhone+"<br>Address: "+od.address+"<br><br><b>Items:</b><br>"+od.items+"<br><br><b>Collect: $"+od.total+"</b>";}}).catch(function(){show("done");document.getElementById("done-icon").textContent="\u26A0\uFE0F";document.getElementById("done-title").textContent="Error";document.getElementById("done-msg").textContent="Connection error. Please try again.";});}',
     '</script></body></html>'
   ];
   res.send(lines.join('\n'));
@@ -1245,21 +1320,74 @@ app.post('/api/driver/scan', async (req, res) => {
     return res.status(400).json({ error: 'Order ID and phone are required.' });
   }
 
+  // 1. Off-Hours Check: Kitchen closes at 11:00 PM; dispatches between 11:30 PM and 11:00 AM Beirut time are blocked
+  const kitchenCheck = isKitchenOpenForDispatch();
+  if (!kitchenCheck.allowed) {
+    console.warn(`[driver_scan] Off-hours dispatch rejected for order #${orderId}: ${kitchenCheck.reason}`);
+    return res.status(403).json({
+      error: 'Kitchen is currently closed. Deliveries cannot be dispatched during off-hours.',
+      reason: kitchenCheck.reason
+    });
+  }
+
   const client = await pool.connect();
   try {
     const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 LIMIT 1', [Number(orderId)]);
     if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
     const order = orderRes.rows[0];
 
+    // 2. Order Age Check: Suppress stale orders created > 4 hours ago or from a previous day
+    if (isOrderTooOld(order.created_at, 4) || !isOrderFromToday(order.created_at)) {
+      console.warn(`[driver_scan] Stale order #${orderId} scan suppressed (created: ${order.created_at})`);
+      return res.json({
+        success: true,
+        alreadyCompleted: true,
+        alreadyDispatched: true,
+        message: `Order #${orderId} was completed earlier and is now closed. No notifications sent.`,
+        orderId: order.id
+      });
+    }
+
+    // 3. Idempotency Check: If order is already completed / delivered with driver assigned
+    const target = normalizePhone(phoneNum);
+    const isAlreadyDispatched = (order.status === 'completed' || order.status === 'delivered') && order.driver_phone;
+    if (isAlreadyDispatched) {
+      console.log(`[driver_scan] Order #${orderId} already dispatched to driver ${order.driver_phone}. Suppressing duplicate notifications.`);
+      return res.json({
+        success: true,
+        alreadyDispatched: true,
+        message: `Order #${orderId} was already dispatched to driver ${order.driver_phone}.`,
+        orderId: order.id,
+        orderDetails: {
+          id: order.id,
+          customerName: order.customer_name || '-',
+          customerPhone: order.customer_phone || 'N/A',
+          address: String(order.delivery_address || 'Pickup').replace(/\[Maps Pin:[^\]]*\]/gi, '').replace(/[\r\n]+/g, ' ').trim() || 'Pickup',
+          items: '',
+          total: Number(order.total_amount || 0).toFixed(2)
+        }
+      });
+    }
+
+    // 4. Debounce Check: If WhatsApp was sent in the last 15 minutes for this order
+    if (order.last_whatsapp_sent_at) {
+      const minutesSinceLast = (Date.now() - new Date(order.last_whatsapp_sent_at).getTime()) / (1000 * 60);
+      if (minutesSinceLast < 15) {
+        console.log(`[driver_scan] Order #${orderId} scan debounced (${minutesSinceLast.toFixed(1)} mins ago).`);
+        return res.json({
+          success: true,
+          alreadyDispatched: true,
+          message: `Order #${orderId} was recently dispatched (${minutesSinceLast.toFixed(0)}m ago). Duplicate prevented.`,
+          orderId: order.id
+        });
+      }
+    }
+
     const itemsRes = await client.query(
       'SELECT i.*, p.name as product_name FROM order_items i LEFT JOIN products p ON i.product_id = p.id WHERE i.order_id = $1',
       [Number(orderId)]
     );
     const items = itemsRes.rows;
-
-    const multiLineItems = items
-      .map(i => '• ' + i.quantity + 'x *' + (i.product_name || 'Item') + '* ($' + Number(i.total_price || 0).toFixed(2) + ')')
-      .join('\n');
 
     const cleanAddr = String(order.delivery_address || 'Pickup')
       .replace(/\[Maps Pin:[^\]]*\]/gi, '').replace(/[\r\n]+/g, ' ').trim() || 'Pickup';
@@ -1285,16 +1413,19 @@ app.post('/api/driver/scan', async (req, res) => {
       + (deliveryFee > 0 ? ' | Delivery: $' + deliveryFee.toFixed(2) : '')
       + ' | Collect: $' + Number(order.total_amount || 0).toFixed(2);
 
+    // Save driver phone, mark order as completed, and record last_whatsapp_sent_at
+    await client.query(
+      "UPDATE orders SET status = 'completed', driver_phone = $1, last_whatsapp_sent_at = NOW(), whatsapp_notification_count = COALESCE(whatsapp_notification_count, 0) + 1 WHERE id = $2",
+      [target, Number(orderId)]
+    );
 
-    // Normalize phone
-    const target = normalizePhone(phoneNum);
-
-    // Save driver phone and mark order as completed (picked up) in database
-    await client.query("UPDATE orders SET status = 'completed', driver_phone = $1 WHERE id = $2", [target, Number(orderId)]);
-
-    // Send "out_for_delivery" WhatsApp notification to customer
-    if (order.customer_phone) {
-      await sendCustomerOutForDeliveryNotification(order.id, order.customer_phone);
+    // Send "out_for_delivery" WhatsApp notification to customer (only if not already sent)
+    if (order.customer_phone && !order.last_whatsapp_sent_at) {
+      try {
+        await sendCustomerOutForDeliveryNotification(order.id, order.customer_phone);
+      } catch (err) {
+        console.error('[driver_scan] Failed to notify customer:', err.message);
+      }
     }
 
     const apiKey = process.env.INFOBIP_API_KEY || 'd42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e';
@@ -1303,7 +1434,6 @@ app.post('/api/driver/scan', async (req, res) => {
 
     // wa.me fallback keeps full multiline format
     const waUrl = 'https://wa.me/' + target + '?text=' + encodeURIComponent(driverText);
-
 
     let sentVia = null;
     try {
