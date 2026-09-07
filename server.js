@@ -966,7 +966,9 @@ async function sendInfobipOrderNotifications({
   discountAmount,
   deliveryFee,
   total,
-  orderType
+  orderType,
+  lat = null,
+  lng = null
 }) {
   console.log(`[infobip_dispatch] START for Order #${orderId}`);
   const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
@@ -984,12 +986,15 @@ async function sendInfobipOrderNotifications({
   });
 
   // Separate address & Maps link if present
-  let cleanAddress = deliveryAddress || "";
+  let cleanAddress = (deliveryAddress || "").trim();
   let mapsPinUrl = "";
   const mapsMatch = cleanAddress.match(/\[Maps Pin:\s*(.*?)\]/i);
   if (mapsMatch) {
     mapsPinUrl = mapsMatch[1].trim();
     cleanAddress = cleanAddress.replace(/\[Maps Pin:\s*.*?\]/gi, "").trim();
+  }
+  if (!mapsPinUrl && lat && lng) {
+    mapsPinUrl = `https://www.google.com/maps?q=${lat},${lng}`;
   }
 
   // Base Order Info Layout
@@ -1000,10 +1005,17 @@ async function sendInfobipOrderNotifications({
   baseOrderInfo += `* Name: ${customerName || "Customer"}\r\n`;
   baseOrderInfo += `* Phone: ${customerPhone || "N/A"}\r\n`;
   baseOrderInfo += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
-  if (orderType !== 'pickup' && cleanAddress) {
-    baseOrderInfo += `* Delivery Address: ${cleanAddress}\r\n`;
-    if (mapsPinUrl) {
-      baseOrderInfo += `\r\n[Maps Pin: ${mapsPinUrl}]\r\n`;
+  if (orderType !== 'pickup') {
+    if (cleanAddress && mapsPinUrl) {
+      baseOrderInfo += `* Delivery Address: ${cleanAddress}\r\n`;
+      baseOrderInfo += `* Location: ${mapsPinUrl}\r\n`;
+    } else if (cleanAddress) {
+      baseOrderInfo += `* Delivery Address: ${cleanAddress}\r\n`;
+    } else if (mapsPinUrl) {
+      baseOrderInfo += `* Delivery Address: Pinned Location\r\n`;
+      baseOrderInfo += `* Location: ${mapsPinUrl}\r\n`;
+    } else {
+      baseOrderInfo += `* Delivery Address: Not specified\r\n`;
     }
   }
   baseOrderInfo += `* Requested Time: ${deliveryTime || 'ASAP'}\r\n\r\n`;
@@ -1022,23 +1034,12 @@ async function sendInfobipOrderNotifications({
 
   const clientConfirmationText = `${baseOrderInfo}\r\n\r\nYour order #${orderId} has been received at OVRLOAD and is awaiting confirmation!\r\nThank you for ordering from OVRLOAD`;
 
-  // 1. Send Customer Order Confirmation
+  // 1. Send Customer Order Confirmation (Guaranteed EXACTLY 1 message to client)
   const clientTarget = normalizePhone(customerPhone);
   if (clientTarget && clientTarget !== sender) {
-    // A. ALWAYS send the pre-approved Meta Template (guaranteed delivery outside 24h session)
-    const summaryPlaceholder = `OVRLOAD • Total: $${Number(total || 0).toFixed(2)}`;
-    try {
-      const templateResult = await sendWhatsAppTemplate({
-        to: clientTarget,
-        templateName: "order_confirmation",
-        placeholders: [String(orderId), summaryPlaceholder]
-      });
-      console.log(`[infobip_dispatch] Sent order_confirmation template to customer ${clientTarget} for order #${orderId}:`, templateResult?.messages?.[0]?.status?.name || templateResult?.status);
-    } catch (tplErr) {
-      console.error(`[infobip_dispatch] Error sending order_confirmation template to ${clientTarget}:`, tplErr);
-    }
+    let receiptSent = false;
 
-    // B. Check if customer has an active 24h inbound session in database before sending free-form text
+    // Check if customer has an active 24h inbound session in database
     let hasActiveSession = false;
     try {
       const sessRes = await pool.query(
@@ -1052,28 +1053,51 @@ async function sendInfobipOrderNotifications({
       hasActiveSession = false;
     }
 
-    // Only send the detailed free-form receipt if a session is actively open to avoid code 7010
-    if (hasActiveSession) {
-      console.log(`[infobip_dispatch] Active 24h session found for ${clientTarget}, dispatching detailed receipt...`);
-      try {
-        await fetch(`${baseUrl}/whatsapp/1/message/text`, {
-          method: "POST",
-          headers: {
-            "Authorization": `App ${apiKey}`,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
-          body: JSON.stringify({
-            from: sender,
-            to: clientTarget,
-            content: { text: clientConfirmationText }
-          })
-        });
-      } catch (freeFormErr) {
-        console.warn(`[infobip_dispatch] Free-form receipt error for ${clientTarget}:`, freeFormErr.message);
+    // Try sending full detailed receipt if session is active or available
+    try {
+      console.log(`[infobip_dispatch] Attempting to dispatch detailed receipt to customer ${clientTarget} (activeSession=${hasActiveSession})...`);
+      const textRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+        method: "POST",
+        headers: {
+          "Authorization": `App ${apiKey}`,
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          from: sender,
+          to: clientTarget,
+          content: { text: clientConfirmationText }
+        })
+      });
+      const textData = await textRes.json().catch(() => ({}));
+      const statusObj = textData?.status || textData?.messages?.[0]?.status;
+      const statusId = statusObj?.id;
+      const statusName = statusObj?.name;
+
+      if (textRes.ok && statusId !== 7010 && statusName !== "REJECTED_NO_SESSION") {
+        receiptSent = true;
+        console.log(`[infobip_dispatch] Detailed receipt successfully sent to customer ${clientTarget} for order #${orderId}`);
+      } else {
+        console.warn(`[infobip_dispatch] Free-form receipt not accepted for ${clientTarget} (statusId=${statusId}, statusName=${statusName}), falling back to template...`);
       }
-    } else {
-      console.log(`[infobip_dispatch] No active session for ${clientTarget}; suppressed free-form text to prevent error 7010.`);
+    } catch (freeFormErr) {
+      console.warn(`[infobip_dispatch] Free-form receipt error for ${clientTarget}:`, freeFormErr.message);
+    }
+
+    // Fallback: If free-form receipt was not sent (e.g. no active 24h window), send pre-approved Meta Template
+    if (!receiptSent) {
+      console.log(`[infobip_dispatch] Sending fallback order_confirmation template to ${clientTarget}...`);
+      const summaryPlaceholder = `OVRLOAD • Total: $${Number(total || 0).toFixed(2)}`;
+      try {
+        const templateResult = await sendWhatsAppTemplate({
+          to: clientTarget,
+          templateName: "order_confirmation",
+          placeholders: [String(orderId), summaryPlaceholder]
+        });
+        console.log(`[infobip_dispatch] Sent fallback order_confirmation template to customer ${clientTarget} for order #${orderId}:`, templateResult?.messages?.[0]?.status?.name || templateResult?.status);
+      } catch (tplErr) {
+        console.error(`[infobip_dispatch] Error sending fallback order_confirmation template to ${clientTarget}:`, tplErr);
+      }
     }
   }
 
@@ -1257,7 +1281,9 @@ app.post('/api/orders/save', async (req, res) => {
         discountAmount,
         deliveryFee,
         total,
-        orderType
+        orderType,
+        lat,
+        lng
       });
     } catch (notifyErr) {
       console.error('[orders/save] Infobip notification error:', notifyErr);

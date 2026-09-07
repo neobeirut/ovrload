@@ -994,13 +994,25 @@ document.addEventListener('DOMContentLoaded', () => {
     text += `* Name: ${name}\r\n`;
     text += `* Phone: ${phone}\r\n`;
     text += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
-    if (orderType === 'delivery' && location) {
-      const mapsMatch = location.match(/\[Maps Pin:\s*(.*?)\]/i);
+    if (orderType === 'delivery') {
+      const mapsMatch = location ? location.match(/\[Maps Pin:\s*(.*?)\]/i) : null;
+      let cleanAddr = location || '';
+      let mapsPin = '';
       if (mapsMatch) {
-        const cleanAddr = location.replace(/\[Maps Pin:\s*.*?\]/gi, '').trim();
-        text += `* Delivery Address: ${cleanAddr}\r\n\r\n[Maps Pin: ${mapsMatch[1].trim()}]\r\n`;
+        mapsPin = mapsMatch[1].trim();
+        cleanAddr = cleanAddr.replace(/\[Maps Pin:\s*.*?\]/gi, '').trim();
+      }
+      if (!mapsPin && userCoords && userCoords.lat && userCoords.lng) {
+        mapsPin = `https://www.google.com/maps?q=${userCoords.lat},${userCoords.lng}`;
+      }
+      if (cleanAddr && mapsPin) {
+        text += `* Delivery Address: ${cleanAddr}\r\n* Location: ${mapsPin}\r\n`;
+      } else if (cleanAddr) {
+        text += `* Delivery Address: ${cleanAddr}\r\n`;
+      } else if (mapsPin) {
+        text += `* Delivery Address: Pinned Location\r\n* Location: ${mapsPin}\r\n`;
       } else {
-        text += `* Delivery Address: ${location}\r\n`;
+        text += `* Delivery Address: Not specified\r\n`;
       }
     }
     text += `* Requested Time: ${deliveryTime}\r\n\r\n`;
