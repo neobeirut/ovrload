@@ -766,6 +766,7 @@ app.get('/api/orders/:id', requireAuth, async (req, res) => {
 const statusUpdatePaths = [
   '/api/orders/:id(\\d+)/status',
   '/api/orders/:id(\\d+)',
+  '/api/orders/admin/:id(\\d+)',
   '/api/pos/orders/:id(\\d+)/status',
   '/api/pos/orders/:id(\\d+)'
 ];
@@ -821,7 +822,7 @@ function isOrderTooOld(createdAt, maxHours = 4, now = new Date()) {
 
 async function handleOrderStatusUpdate(req, res) {
   const { status, driverPhone, phone, customerPhone } = req.body;
-  const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'];
+  const allowed = ['pending', 'accepted', 'confirmed', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
   }
@@ -865,8 +866,10 @@ async function handleOrderStatusUpdate(req, res) {
     const updatedOrder = result.rows[0];
     const targetCustomerPhone = updatedOrder.customer_phone || customerPhone;
 
-    // Send "We are preparing your items now!" when confirmed from the POS (only once on transition)
-    if ((status === 'confirmed' || status === 'preparing') && prevStatus !== 'preparing' && prevStatus !== 'confirmed' && targetCustomerPhone) {
+    // Send "We are preparing your items now!" when accepted/confirmed/preparing from POS or Admin (only once on transition)
+    const isPreparingOrAccepted = status === 'confirmed' || status === 'preparing' || status === 'accepted';
+    const wasPreparingOrAccepted = prevStatus === 'confirmed' || prevStatus === 'preparing' || prevStatus === 'accepted';
+    if (isPreparingOrAccepted && !wasPreparingOrAccepted && targetCustomerPhone) {
       if (isOrderFromToday(updatedOrder.created_at)) {
         await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
       }
@@ -941,6 +944,7 @@ async function sendWhatsAppTemplate({ to, templateName, placeholders, language =
       })
     });
     const tplData = await tplRes.json().catch(() => ({}));
+    tplData.ok = tplRes.ok;
     console.log(`[infobip_template] Sent ${templateName} (${language}) to ${target}: status=${tplRes.status}`, JSON.stringify(tplData));
 
     if (!tplRes.ok && language === "en") {
@@ -1134,22 +1138,11 @@ async function sendCustomerPreparingNotification(orderId, customerPhone) {
   console.log(`[preparing_notification] Sending order_preparing WhatsApp to customer ${target} for order #${orderId}`);
 
   // Direct Meta Template dispatch (order_preparing) - sends exactly one message
-  let result = await sendWhatsAppTemplate({
+  return await sendWhatsAppTemplate({
     to: target,
     templateName: "order_preparing",
     placeholders: []
   });
-
-  // If template without placeholders is rejected, fallback with orderId
-  if (!result || !result.ok) {
-    result = await sendWhatsAppTemplate({
-      to: target,
-      templateName: "order_preparing",
-      placeholders: [String(orderId)]
-    });
-  }
-
-  return result;
 }
 
 // Helper function to send "Out for Delivery" WhatsApp notification to customer
