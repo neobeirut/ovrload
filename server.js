@@ -822,7 +822,7 @@ function isOrderTooOld(createdAt, maxHours = 4, now = new Date()) {
 
 async function handleOrderStatusUpdate(req, res) {
   const { status, driverPhone, phone, customerPhone } = req.body;
-  const allowed = ['pending', 'accepted', 'confirmed', 'preparing', 'ready', 'delivered', 'completed', 'cancelled'];
+  const allowed = ['pending', 'accepted', 'confirmed', 'preparing', 'ready', 'out_for_delivery', 'delivered', 'completed', 'cancelled'];
   if (!status || !allowed.includes(status)) {
     return res.status(400).json({ error: `Invalid status. Must be one of: ${allowed.join(', ')}` });
   }
@@ -875,14 +875,11 @@ async function handleOrderStatusUpdate(req, res) {
       }
     }
 
-    if (status === 'completed' && prevStatus !== 'completed' && targetCustomerPhone) {
-      const kitchenCheck = isKitchenOpenForDispatch();
-      const isToday = isOrderFromToday(updatedOrder.created_at);
-      if (kitchenCheck.allowed && isToday && !isOrderTooOld(updatedOrder.created_at, 6)) {
-        await sendCustomerOutForDeliveryNotification(updatedOrder.id, targetCustomerPhone);
-      } else {
-        console.warn(`[order_status] Suppressed out_for_delivery for order #${updatedOrder.id} (kitchen open: ${kitchenCheck.allowed}, isToday: ${isToday})`);
-      }
+    // Send "Your order {{1}} is out for delivery." when marked as completed/delivered/out_for_delivery (e.g. driver pickup, POS, Admin)
+    const isPickupOrDelivery = status === 'completed' || status === 'delivered' || status === 'out_for_delivery';
+    const wasPickupOrDelivery = prevStatus === 'completed' || prevStatus === 'delivered' || prevStatus === 'out_for_delivery';
+    if (isPickupOrDelivery && !wasPickupOrDelivery && targetCustomerPhone) {
+      await sendCustomerOutForDeliveryNotification(updatedOrder.id, targetCustomerPhone);
     }
 
     if (status === 'cancelled' && prevStatus !== 'cancelled' && targetCustomerPhone) {
@@ -1151,18 +1148,14 @@ async function sendCustomerOutForDeliveryNotification(orderId, customerPhone) {
   const target = normalizePhone(customerPhone);
   if (!target) return;
 
-  // Safeguard: Never send out for delivery notifications during off-hours
-  const kitchenCheck = isKitchenOpenForDispatch();
-  if (!kitchenCheck.allowed) {
-    console.warn(`[whatsapp] Blocked out_for_delivery for order #${orderId} to ${target}: ${kitchenCheck.reason}`);
-    return;
-  }
+  const orderTag = String(orderId).startsWith('#') ? String(orderId) : `#${orderId}`;
+  console.log(`[out_for_delivery] Sending template to customer ${target} for order ${orderTag}`);
 
-  // Direct Meta Template dispatch (bypasses 24h session constraint)
-  await sendWhatsAppTemplate({
+  // Direct Meta Template dispatch (out_for_delivery) - content: "Your order {{1}} is out for delivery."
+  return await sendWhatsAppTemplate({
     to: target,
     templateName: "out_for_delivery",
-    placeholders: [String(orderId)]
+    placeholders: [orderTag]
   });
 }
 
@@ -1381,15 +1374,7 @@ app.post('/api/driver/scan', async (req, res) => {
     return res.status(400).json({ error: 'Order ID and phone are required.' });
   }
 
-  // 1. Off-Hours Check: Kitchen closes at 11:00 PM; dispatches between 11:30 PM and 11:00 AM Beirut time are blocked
-  const kitchenCheck = isKitchenOpenForDispatch();
-  if (!kitchenCheck.allowed) {
-    console.warn(`[driver_scan] Off-hours dispatch rejected for order #${orderId}: ${kitchenCheck.reason}`);
-    return res.status(403).json({
-      error: 'Kitchen is currently closed. Deliveries cannot be dispatched during off-hours.',
-      reason: kitchenCheck.reason
-    });
-  }
+
 
   const client = await pool.connect();
   try {
