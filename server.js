@@ -273,6 +273,213 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// GET /api/pos/products
+app.get('/api/pos/products', async (req, res) => {
+  try {
+    const categoriesResult = await pool.query(
+      `SELECT id, name, image_url, display_order, is_active 
+       FROM categories 
+       WHERE is_active = true 
+       ORDER BY display_order ASC, name ASC`
+    );
+
+    const productsResult = await pool.query(
+      `SELECT 
+        p.id, 
+        p.name, 
+        p.description, 
+        p.price::float as unit_price_usd, 
+        p.image_url, 
+        p.category_id,
+        c.name as category_name,
+        p.sort_order, 
+        p.status,
+        COALESCE(
+          (SELECT json_agg(json_build_object(
+            'id', pc.id,
+            'ingredient', pc.ingredient,
+            'name', pc.ingredient,
+            'customization_type', pc.customization_type,
+            'price', pc.price::float,
+            'option_group_name', ci.option_group_name,
+            'is_required', ci.is_required,
+            'is_multi_select', ci.is_multi_select
+          ))
+           FROM product_customizations pc
+           LEFT JOIN customization_items ci ON pc.customization_item_id = ci.id
+           WHERE pc.product_id = p.id AND pc.is_active = true
+          ), '[]'::json
+        ) as customizations
+       FROM products p
+       LEFT JOIN categories c ON p.category_id = c.id
+       WHERE p.status IS NULL OR p.status != 'Hide from Menu'
+       ORDER BY COALESCE(c.display_order, 9999) ASC, c.name ASC, p.sort_order ASC, p.name ASC`
+    );
+
+    let settingsObj = {};
+    try {
+      const settingsResult = await pool.query('SELECT setting_key, setting_value FROM app_settings');
+      (settingsResult.rows || []).forEach(row => {
+        settingsObj[row.setting_key] = row.setting_value;
+      });
+    } catch (e) {
+      console.warn("Could not query app_settings:", e.message);
+    }
+
+    res.json({
+      categories: categoriesResult.rows || [],
+      products: productsResult.rows || [],
+      settings: {
+        toters_discount_percent: parseFloat(settingsObj.toters_discount_percent || "15"),
+        noknok_discount_percent: parseFloat(settingsObj.noknok_discount_percent || "15"),
+        print_server_ip: settingsObj.print_server_ip || "",
+        print_server_port: settingsObj.print_server_port || "9191"
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching POS products:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/pos/orders
+app.get('/api/pos/orders', async (req, res) => {
+  try {
+    const type = req.query.type || 'all';
+    let query = `
+      SELECT 
+        o.id,
+        o.branch_id,
+        o.order_type,
+        o.order_source,
+        o.payment_method,
+        o.delivery_address,
+        o.customer_name,
+        o.customer_phone,
+        o.subtotal_amount::float,
+        o.delivery_fee::float,
+        o.discount_amount::float,
+        o.total_amount::float,
+        o.status,
+        o.special_instructions,
+        o.void_reason,
+        o.created_at,
+        COALESCE(
+          (SELECT json_agg(json_build_object(
+            'id', oi.id,
+            'product_id', oi.product_id,
+            'quantity', oi.quantity,
+            'unit_price', oi.unit_price::float,
+            'total_price', oi.total_price::float,
+            'customizations', oi.customizations,
+            'comment', oi.comment,
+            'product_name', p.name
+          ))
+           FROM order_items oi
+           LEFT JOIN products p ON oi.product_id = p.id
+           WHERE oi.order_id = o.id
+          ), '[]'::json
+        ) as items
+      FROM orders o
+    `;
+
+    if (type === 'pending') {
+      query += ` WHERE o.status = 'pending' ORDER BY o.created_at DESC`;
+    } else if (type === 'held') {
+      query += ` WHERE o.status = 'held' ORDER BY o.created_at DESC`;
+    } else {
+      query += ` ORDER BY o.created_at DESC LIMIT 50`;
+    }
+
+    const result = await pool.query(query);
+    res.json({ orders: result.rows || [] });
+  } catch (error) {
+    console.error('Error fetching POS orders:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/pos/orders
+app.post('/api/pos/orders', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const {
+      branchId = 1,
+      orderType = "pickup",
+      orderSource = "POS",
+      paymentMethod = "Cash",
+      customerName = "",
+      customerPhone = "",
+      deliveryAddress = "",
+      specialInstructions = "",
+      status = "preparing",
+      items = [],
+      subtotal = 0,
+      deliveryFee = 0,
+      discountAmount = 0,
+      total = 0
+    } = req.body;
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ error: "Cannot create an empty order" });
+    }
+
+    await client.query('BEGIN');
+    const orderResult = await client.query(
+      `INSERT INTO orders (
+        branch_id, order_type, order_source, payment_method,
+        customer_name, customer_phone, delivery_address, special_instructions,
+        status, subtotal_amount, delivery_fee, discount_amount, total_amount, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      RETURNING id, created_at`,
+      [
+        branchId, orderType, orderSource, paymentMethod,
+        customerName || 'Walk-in', customerPhone || '', deliveryAddress || '', specialInstructions || '',
+        status, subtotal, deliveryFee, discountAmount, total
+      ]
+    );
+
+    const newOrder = orderResult.rows[0];
+    const orderId = newOrder.id;
+
+    for (const item of items) {
+      const unitPrice = parseFloat(item.unit_price || item.unit_price_usd || 0);
+      const qty = parseInt(item.quantity || item.qty || 1, 10);
+      const totalPrice = unitPrice * qty;
+      const custText = Array.isArray(item.customizations)
+        ? item.customizations.map(c => typeof c === "string" ? c : (c.ingredient || c.name)).join(", ")
+        : (item.customizations || null);
+      const commentText = item.comment || item.note || null;
+
+      await client.query(
+        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price, customizations, comment)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [orderId, item.product_id || item.id, qty, unitPrice, totalPrice, custText, commentText]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      orderId,
+      order: {
+        id: orderId,
+        order_source: orderSource,
+        payment_method: paymentMethod,
+        total_amount: total,
+        status,
+        created_at: newOrder.created_at
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error("Error in POST /api/pos/orders:", error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // POST /api/products (Admin only)
 app.post('/api/products', requireAuth, async (req, res) => {
   try {
