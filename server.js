@@ -1257,17 +1257,46 @@ async function sendInfobipOrderNotifications({
     } catch (tplErr) {
       console.error(`[infobip_dispatch] Error sending order_confirmation template to ${clientTarget}:`, tplErr);
     }
+
+    // Also attempt sending the full detailed receipt to customer (delivers if customer has an active 24h WhatsApp session)
+    if (clientTarget !== sender) {
+      try {
+        await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+          method: "POST",
+          headers: {
+            "Authorization": `App ${apiKey}`,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            from: sender,
+            to: clientTarget,
+            content: { text: clientConfirmationText }
+          })
+        });
+      } catch (textErr) {
+        console.warn(`[infobip_dispatch] Full text receipt error for customer ${clientTarget}:`, textErr.message);
+      }
+    }
   }
 
-  // 2. Send Full Order Details to OVRLOAD Store Number (81202607) & any configured store/kitchen phone
-  const storePhones = [
-    "96181202607",
-    normalizePhone(process.env.STORE_NOTIFICATION_PHONE),
-    normalizePhone(process.env.KITCHEN_NOTIFICATION_PHONE)
-  ].filter((p, idx, arr) => p && arr.indexOf(p) === idx);
+  // 2. Send Full Order Details to Store / Kitchen WhatsApp
+  // Note: Meta rejects sending from sender to sender (code 7006: UNDELIVERABLE_REJECTED_OPERATOR).
+  // Therefore we filter out 'sender' (96181202607) and dispatch to external store notification phones (e.g. STORE_NOTIFICATION_PHONE: 96181927007).
+  const rawStorePhones = [
+    ...(process.env.STORE_NOTIFICATION_PHONE ? process.env.STORE_NOTIFICATION_PHONE.split(',') : []),
+    ...(process.env.KITCHEN_NOTIFICATION_PHONE ? process.env.KITCHEN_NOTIFICATION_PHONE.split(',') : [])
+  ];
+  const storePhones = rawStorePhones
+    .map(p => normalizePhone(p))
+    .filter((p, idx, arr) => p && p !== sender && arr.indexOf(p) === idx);
+
+  if (storePhones.length === 0) {
+    console.warn(`[infobip_dispatch] Note: No external store notification phone configured. Cannot send from ${sender} to itself (Meta code 7006).`);
+  }
 
   for (const storePhone of storePhones) {
-    console.log(`[infobip_dispatch] Sending order details message to OVRLOAD store phone: ${storePhone}`);
+    console.log(`[infobip_dispatch] Sending order details message to store phone: ${storePhone}`);
     try {
       const storeRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
         method: "POST",
