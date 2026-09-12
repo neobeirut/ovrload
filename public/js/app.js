@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnTypeDelivery.classList.add('active');
       btnTypePickup.classList.remove('active');
       if (orderLocationGroup) orderLocationGroup.style.display = 'block';
-      if (orderLocation) orderLocation.required = true;
+      if (orderLocation) orderLocation.required = false;
       if (userCoords) {
         recalculateDelivery(userCoords.lat, userCoords.lng);
       } else {
@@ -994,6 +994,7 @@ document.addEventListener('DOMContentLoaded', () => {
     text += `* Name: ${name}\r\n`;
     text += `* Phone: ${phone}\r\n`;
     text += `* Order Type: ${orderType === 'pickup' ? 'Pickup' : 'Delivery'}\r\n`;
+    let hasMapsPin = false;
     if (orderType === 'delivery') {
       const mapsMatch = location ? location.match(/\[Maps Pin:\s*(.*?)\]/i) : null;
       let cleanAddr = location || '';
@@ -1005,14 +1006,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!mapsPin && userCoords && userCoords.lat && userCoords.lng) {
         mapsPin = `https://www.google.com/maps?q=${userCoords.lat},${userCoords.lng}`;
       }
+      if (mapsPin) {
+        hasMapsPin = true;
+      }
       if (cleanAddr && mapsPin) {
         text += `* Delivery Address: ${cleanAddr}\r\n* Location: ${mapsPin}\r\n`;
       } else if (cleanAddr) {
-        text += `* Delivery Address: ${cleanAddr}\r\n`;
+        text += `* Delivery Address: ${cleanAddr}\r\n* Location: Sending location pin now\r\n`;
       } else if (mapsPin) {
         text += `* Delivery Address: Pinned Location\r\n* Location: ${mapsPin}\r\n`;
       } else {
-        text += `* Delivery Address: Not specified\r\n`;
+        text += `* Delivery Address: Sending location pin now\r\n`;
       }
     }
     text += `* Requested Time: ${deliveryTime}\r\n\r\n`;
@@ -1025,9 +1029,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (discountPercent > 0) {
       text += `* WhatsApp Discount (${discountPercent}%): -$${discountVal.toFixed(2)}\r\n`;
     }
-    text += `* Delivery Fee: $${effectiveDeliveryFee.toFixed(2)}\r\n`;
-    text += `* Total Amount: $${totalVal.toFixed(2)}\r\n\r\n`;
-    text += `We are preparing your items now! Thank you for ordering from OVRLOAD`;
+    if (orderType === 'delivery' && !hasMapsPin) {
+      text += `* Delivery Fee: Pending location confirmation\r\n`;
+      text += `* Total Amount: $${totalVal.toFixed(2)} + Delivery\r\n\r\n`;
+      text += `📍 I am sharing my live location with you below to confirm the delivery fee and proceed with my order!`;
+    } else {
+      text += `* Delivery Fee: $${effectiveDeliveryFee.toFixed(2)}\r\n`;
+      text += `* Total Amount: $${totalVal.toFixed(2)}\r\n\r\n`;
+      text += `We are preparing your items now! Thank you for ordering from OVRLOAD`;
+    }
 
     return `https://wa.me/96181202607?text=${encodeURIComponent(text)}`;
   }
@@ -1038,6 +1048,44 @@ document.addEventListener('DOMContentLoaded', () => {
   if (closeSuccessBtn && successOverlay) {
     closeSuccessBtn.addEventListener('click', () => {
       successOverlay.style.display = 'none';
+    });
+  }
+
+  // Handle Location Prompt Overlay Elements
+  const locationPromptOverlay = document.getElementById('location-prompt-overlay');
+  const btnPromptProceedWa = document.getElementById('btn-prompt-proceed-wa');
+  const btnPromptGoBack = document.getElementById('btn-prompt-go-back');
+
+  if (btnPromptGoBack && locationPromptOverlay) {
+    btnPromptGoBack.addEventListener('click', () => {
+      locationPromptOverlay.style.display = 'none';
+      if (orderLocationGroup) {
+        orderLocationGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      if (btnGpsLocation) {
+        btnGpsLocation.classList.add('pulse-focus');
+        setTimeout(() => {
+          btnGpsLocation.classList.remove('pulse-focus');
+        }, 2400);
+      }
+      if (orderLocation) {
+        orderLocation.focus();
+      }
+    });
+  }
+
+  if (btnPromptProceedWa && locationPromptOverlay) {
+    btnPromptProceedWa.addEventListener('click', () => {
+      locationPromptOverlay.style.display = 'none';
+      executeOrderSubmission(true);
+    });
+  }
+
+  if (locationPromptOverlay) {
+    locationPromptOverlay.addEventListener('click', (e) => {
+      if (e.target === locationPromptOverlay) {
+        locationPromptOverlay.style.display = 'none';
+      }
     });
   }
 
@@ -1055,15 +1103,6 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (orderType === 'delivery') {
-      const addressText = orderLocation ? orderLocation.value.trim() : '';
-      if (!addressText) {
-        alert("Please enter your delivery address.");
-        if (orderLocation) orderLocation.focus();
-        return;
-      }
-    }
-
     if (orderTimeType.value === 'scheduled' && orderTime.value) {
       const minTime = getMinDeliveryTime();
       if (orderTime.value < minTime) {
@@ -1072,6 +1111,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    // Check if delivery order has a pinned GPS location
+    const hasPinnedLocation = Boolean((userCoords && userCoords.lat && userCoords.lng) || (orderLocation && orderLocation.value.includes('[Maps Pin:')));
+
+    if (orderType === 'delivery' && !hasPinnedLocation) {
+      if (locationPromptOverlay) {
+        locationPromptOverlay.style.display = 'flex';
+        return;
+      }
+    }
+
+    executeOrderSubmission(false);
+  });
+
+  // Execute Order Submission Logic
+  async function executeOrderSubmission(sendLocationOnWhatsApp = false) {
     saveUserInfo();
 
     const name = orderName.value.trim();
@@ -1096,6 +1150,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper to finish order, reset cart, and show success modal on screen
     function finishOrderSuccess(orderId) {
+      const directWaUrl = getWhatsAppUrl(orderId);
+
       // Clear cart
       cart = [];
       saveCart();
@@ -1105,23 +1161,44 @@ document.addEventListener('DOMContentLoaded', () => {
       // Show success modal on screen
       const sOverlay = document.getElementById('order-success-overlay');
       const sMsg = document.getElementById('order-success-msg');
+      const sWaBtn = document.getElementById('btn-open-whatsapp-direct');
+
       if (sMsg && orderId) {
-        sMsg.textContent = `Your order #${orderId} has been sent to our kitchen! We have sent a confirmation message to your WhatsApp.`;
+        if (sendLocationOnWhatsApp) {
+          sMsg.textContent = `Your order #${orderId} has been placed! We haven’t received your location yet. Please share it with us on WhatsApp so we can confirm the delivery fee and proceed with your order.`;
+        } else {
+          sMsg.textContent = `Your order #${orderId} has been sent to our kitchen! We have sent a confirmation message to your WhatsApp.`;
+        }
       }
+
+      if (sWaBtn) {
+        sWaBtn.href = directWaUrl;
+        sWaBtn.style.display = sendLocationOnWhatsApp ? 'flex' : 'none';
+      }
+
       if (sOverlay) {
         sOverlay.style.display = 'flex';
+      }
+
+      // If user chose to send location on WhatsApp, automatically navigate to WhatsApp
+      if (sendLocationOnWhatsApp && directWaUrl) {
+        window.location.href = directWaUrl;
       }
     }
 
     // Save order to DB and trigger automated Infobip WhatsApp confirmation
     try {
+      const addressToSave = orderType === 'pickup'
+        ? 'Pickup at Store'
+        : (location || 'Location to be sent on WhatsApp');
+
       const res = await fetch('/api/orders/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerName: name,
           customerPhone: phone,
-          deliveryAddress: orderType === 'pickup' ? 'Pickup at Store' : location,
+          deliveryAddress: addressToSave,
           orderType: orderType,
           deliveryTime,
           items: cart.map(item => ({
@@ -1155,7 +1232,7 @@ document.addEventListener('DOMContentLoaded', () => {
         submitBtn.innerText = 'Place the Order';
       }
     }
-  });
+  }
 
   // Helper function to escape HTML special characters
   function escapeHtml(str) {
