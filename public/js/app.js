@@ -1180,10 +1180,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sOverlay.style.display = 'flex';
       }
 
-      // If user chose to send location on WhatsApp, automatically navigate to WhatsApp
-      if (sendLocationOnWhatsApp && directWaUrl) {
-        window.location.href = directWaUrl;
-      }
+
     }
 
     // Save order to DB and trigger automated Infobip WhatsApp confirmation

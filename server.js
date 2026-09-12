@@ -1077,9 +1077,7 @@ async function handleOrderStatusUpdate(req, res) {
     const isPreparingOrAccepted = status === 'confirmed' || status === 'preparing' || status === 'accepted';
     const wasPreparingOrAccepted = prevStatus === 'confirmed' || prevStatus === 'preparing' || prevStatus === 'accepted';
     if (isPreparingOrAccepted && !wasPreparingOrAccepted && targetCustomerPhone) {
-      if (isOrderFromToday(updatedOrder.created_at)) {
-        await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
-      }
+      await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
     }
 
     // Send "Your order {{1}} is out for delivery." when marked as completed/delivered/out_for_delivery (e.g. driver pickup, POS, Admin)
@@ -1242,79 +1240,36 @@ async function sendInfobipOrderNotifications({
 
   const clientConfirmationText = `${baseOrderInfo}\r\n\r\nYour order #${orderId} has been received at OVRLOAD and is awaiting confirmation!\r\nThank you for ordering from OVRLOAD`;
 
-  // 1. Send Customer Order Confirmation (Guaranteed EXACTLY 1 message to client)
+  // 1. Send Customer Order Confirmation via approved Meta Template
+  // Template: order_confirmation
+  // Message: Your order #{{1}} has been received at {{2}}. and is awaiting confirmation!
+  //          Thank you for ordering from OVRLOAD
   const clientTarget = normalizePhone(customerPhone);
-  if (clientTarget && clientTarget !== sender) {
-    let receiptSent = false;
-
-    // Check if customer has an active 24h inbound session in database
-    let hasActiveSession = false;
+  if (clientTarget) {
+    console.log(`[infobip_dispatch] Sending order_confirmation template to customer ${clientTarget} for order #${orderId}`);
     try {
-      const sessRes = await pool.query(
-        `SELECT id FROM customer_whatsapp_messages 
-         WHERE phone = $1 AND direction = 'inbound' AND created_at > NOW() - INTERVAL '24 hours' 
-         LIMIT 1;`,
-        [clientTarget]
-      );
-      hasActiveSession = sessRes.rows.length > 0;
-    } catch (sessionErr) {
-      hasActiveSession = false;
-    }
-
-    // Try sending full detailed receipt if session is active or available
-    try {
-      console.log(`[infobip_dispatch] Attempting to dispatch detailed receipt to customer ${clientTarget} (activeSession=${hasActiveSession})...`);
-      const textRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
-        method: "POST",
-        headers: {
-          "Authorization": `App ${apiKey}`,
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          from: sender,
-          to: clientTarget,
-          content: { text: clientConfirmationText }
-        })
+      const templateResult = await sendWhatsAppTemplate({
+        to: clientTarget,
+        templateName: "order_confirmation",
+        placeholders: [String(orderId), "OVRLOAD"]
       });
-      const textData = await textRes.json().catch(() => ({}));
-      const statusObj = textData?.status || textData?.messages?.[0]?.status;
-      const statusId = statusObj?.id;
-      const statusName = statusObj?.name;
-
-      if (textRes.ok && statusId !== 7010 && statusName !== "REJECTED_NO_SESSION") {
-        receiptSent = true;
-        console.log(`[infobip_dispatch] Detailed receipt successfully sent to customer ${clientTarget} for order #${orderId}`);
-      } else {
-        console.warn(`[infobip_dispatch] Free-form receipt not accepted for ${clientTarget} (statusId=${statusId}, statusName=${statusName}), falling back to template...`);
-      }
-    } catch (freeFormErr) {
-      console.warn(`[infobip_dispatch] Free-form receipt error for ${clientTarget}:`, freeFormErr.message);
-    }
-
-    // Fallback: If free-form receipt was not sent (e.g. no active 24h window), send pre-approved Meta Template
-    if (!receiptSent) {
-      console.log(`[infobip_dispatch] Sending fallback order_confirmation template to ${clientTarget}...`);
-      const summaryPlaceholder = `OVRLOAD • Total: $${Number(total || 0).toFixed(2)}`;
-      try {
-        const templateResult = await sendWhatsAppTemplate({
-          to: clientTarget,
-          templateName: "order_confirmation",
-          placeholders: [String(orderId), summaryPlaceholder]
-        });
-        console.log(`[infobip_dispatch] Sent fallback order_confirmation template to customer ${clientTarget} for order #${orderId}:`, templateResult?.messages?.[0]?.status?.name || templateResult?.status);
-      } catch (tplErr) {
-        console.error(`[infobip_dispatch] Error sending fallback order_confirmation template to ${clientTarget}:`, tplErr);
-      }
+      console.log(`[infobip_dispatch] Sent order_confirmation template to customer ${clientTarget} for order #${orderId}:`, JSON.stringify(templateResult));
+    } catch (tplErr) {
+      console.error(`[infobip_dispatch] Error sending order_confirmation template to ${clientTarget}:`, tplErr);
     }
   }
 
-  // 2. Send Store / Kitchen WhatsApp Notification
-  const storeNotificationPhone = normalizePhone(process.env.STORE_NOTIFICATION_PHONE || process.env.KITCHEN_NOTIFICATION_PHONE || "");
-  if (storeNotificationPhone && storeNotificationPhone !== sender) {
-    console.log(`[infobip_dispatch] Sending new order notification to store phone: ${storeNotificationPhone}`);
+  // 2. Send Full Order Details to OVRLOAD Store Number (81202607) & any configured store/kitchen phone
+  const storePhones = [
+    "96181202607",
+    normalizePhone(process.env.STORE_NOTIFICATION_PHONE),
+    normalizePhone(process.env.KITCHEN_NOTIFICATION_PHONE)
+  ].filter((p, idx, arr) => p && arr.indexOf(p) === idx);
+
+  for (const storePhone of storePhones) {
+    console.log(`[infobip_dispatch] Sending order details message to OVRLOAD store phone: ${storePhone}`);
     try {
-      await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+      const storeRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
         method: "POST",
         headers: {
           "Authorization": `App ${apiKey}`,
@@ -1323,12 +1278,14 @@ async function sendInfobipOrderNotifications({
         },
         body: JSON.stringify({
           from: sender,
-          to: storeNotificationPhone,
+          to: storePhone,
           content: { text: baseOrderInfo }
         })
       });
+      const storeData = await storeRes.json().catch(() => ({}));
+      console.log(`[infobip_dispatch] Store order notification to ${storePhone}: status=${storeRes.status}`, JSON.stringify(storeData));
     } catch (storeErr) {
-      console.warn(`[infobip_dispatch] Store notification error to ${storeNotificationPhone}:`, storeErr.message);
+      console.warn(`[infobip_dispatch] Store notification error to ${storePhone}:`, storeErr.message);
     }
   }
 }
