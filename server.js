@@ -40,6 +40,10 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000
 });
 
+pool.on('error', (err) => {
+  console.error('Unexpected idle pool client error:', err.message);
+});
+
 // Universal Phone Number Normalizer (handles Arabic numerals, 0-prefixes, +961 0..., international)
 function normalizePhone(input) {
   if (!input) return "";
