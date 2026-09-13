@@ -346,10 +346,35 @@ app.get('/api/pos/products', async (req, res) => {
 app.get('/api/pos/orders', async (req, res) => {
   try {
     const type = req.query.type || 'all';
-    let query = `
+    const restaurantId = req.query.restaurant_id || req.headers['x-restaurant-id'] || null;
+    const branchId = req.query.branch_id ? parseInt(req.query.branch_id, 10) : null;
+
+    const whereConditions = [];
+    const params = [];
+
+    if (type === 'pending') {
+      whereConditions.push("o.status = 'pending'");
+    } else if (type === 'held') {
+      whereConditions.push("o.status = 'held'");
+    }
+
+    if (restaurantId) {
+      params.push(restaurantId);
+      whereConditions.push(`o.restaurant_id = $${params.length}`);
+    }
+
+    if (branchId && !isNaN(branchId)) {
+      params.push(branchId);
+      whereConditions.push(`o.branch_id = $${params.length}`);
+    }
+
+    const whereClause = whereConditions.length > 0 ? ` WHERE ${whereConditions.join(' AND ')}` : '';
+
+    const query = `
       SELECT 
         o.id,
         o.branch_id,
+        o.restaurant_id,
         o.order_type,
         o.order_source,
         o.payment_method,
@@ -373,25 +398,20 @@ app.get('/api/pos/orders', async (req, res) => {
             'total_price', oi.total_price::float,
             'customizations', oi.customizations,
             'comment', oi.comment,
-            'product_name', p.name
+            'product_name', COALESCE(oi.product_name, p.name, 'Item')
           ))
            FROM order_items oi
-           LEFT JOIN products p ON oi.product_id = p.id
+           LEFT JOIN products p ON oi.product_id::text = p.id::text
            WHERE oi.order_id = o.id
           ), '[]'::json
         ) as items
       FROM orders o
+      ${whereClause}
+      ORDER BY o.created_at DESC
+      LIMIT 50
     `;
 
-    if (type === 'pending') {
-      query += ` WHERE o.status = 'pending' ORDER BY o.created_at DESC`;
-    } else if (type === 'held') {
-      query += ` WHERE o.status = 'held' ORDER BY o.created_at DESC`;
-    } else {
-      query += ` ORDER BY o.created_at DESC LIMIT 50`;
-    }
-
-    const result = await pool.query(query);
+    const result = await pool.query(query, params);
     res.json({ orders: result.rows || [] });
   } catch (error) {
     console.error('Error fetching POS orders:', error);
@@ -405,6 +425,7 @@ app.post('/api/pos/orders', async (req, res) => {
   try {
     const {
       branchId = 1,
+      restaurantId = null,
       orderType = "pickup",
       orderSource = "POS",
       paymentMethod = "Cash",
@@ -420,6 +441,8 @@ app.post('/api/pos/orders', async (req, res) => {
       total = 0
     } = req.body;
 
+    const activeRestId = restaurantId || req.headers['x-restaurant-id'] || null;
+
     if (!items || items.length === 0) {
       return res.status(400).json({ error: "Cannot create an empty order" });
     }
@@ -427,13 +450,13 @@ app.post('/api/pos/orders', async (req, res) => {
     await client.query('BEGIN');
     const orderResult = await client.query(
       `INSERT INTO orders (
-        branch_id, order_type, order_source, payment_method,
+        branch_id, restaurant_id, order_type, order_source, payment_method,
         customer_name, customer_phone, delivery_address, special_instructions,
         status, subtotal_amount, delivery_fee, discount_amount, total_amount, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
       RETURNING id, created_at`,
       [
-        branchId, orderType, orderSource, paymentMethod,
+        branchId, activeRestId, orderType, orderSource, paymentMethod,
         customerName || 'Walk-in', customerPhone || '', deliveryAddress || '', specialInstructions || '',
         status, subtotal, deliveryFee, discountAmount, total
       ]
@@ -450,11 +473,12 @@ app.post('/api/pos/orders', async (req, res) => {
         ? item.customizations.map(c => typeof c === "string" ? c : (c.ingredient || c.name)).join(", ")
         : (item.customizations || null);
       const commentText = item.comment || item.note || null;
+      const prodName = item.name || item.product_name || null;
 
       await client.query(
-        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price, customizations, comment)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [orderId, item.product_id || item.id, qty, unitPrice, totalPrice, custText, commentText]
+        `INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, total_price, customizations, comment)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [orderId, String(item.product_id || item.id || ''), prodName, qty, unitPrice, totalPrice, custText, commentText]
       );
     }
 
@@ -464,6 +488,7 @@ app.post('/api/pos/orders', async (req, res) => {
       orderId,
       order: {
         id: orderId,
+        restaurant_id: activeRestId,
         order_source: orderSource,
         payment_method: paymentMethod,
         total_amount: total,
