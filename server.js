@@ -611,7 +611,7 @@ app.get('/api/reports/category-summary', async (req, res) => {
         COALESCE(SUM(oi.quantity), 0)::int as total_items_sold, 
         COALESCE(SUM(oi.total_price::numeric), 0)::float as total_sales_amount
       FROM order_items oi
-      JOIN products p ON oi.product_id = p.id
+      JOIN products p ON oi.product_id::text = p.id::text
       LEFT JOIN categories c ON p.category_id = c.id
       JOIN orders o ON oi.order_id = o.id
       WHERE o.status != 'cancelled'
@@ -924,14 +924,17 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
         o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
         o.created_at, o.customer_name, o.customer_phone, o.driver_phone,
         o.order_source, o.payment_method,
-        json_agg(json_build_object(
-          'quantity', oi.quantity,
-          'product_name', p.name,
-          'total_price', oi.total_price
-        ) ORDER BY oi.id) AS items
+        COALESCE(
+          json_agg(json_build_object(
+            'quantity', oi.quantity,
+            'product_name', COALESCE(oi.product_name, p.name, 'Item'),
+            'total_price', oi.total_price
+          ) ORDER BY oi.id) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
-      LEFT JOIN products p    ON p.id = oi.product_id
+      LEFT JOIN products p    ON oi.product_id::text = p.id::text
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
         AND o.status NOT IN ('cancelled', 'delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
@@ -956,14 +959,17 @@ app.get('/api/orders/picked-up', async (req, res) => {
         o.id, o.status, o.order_type, o.delivery_address, o.total_amount,
         o.created_at, o.customer_name, o.customer_phone, o.driver_phone,
         o.order_source, o.payment_method,
-        json_agg(json_build_object(
-          'quantity', oi.quantity,
-          'product_name', p.name,
-          'total_price', oi.total_price
-        ) ORDER BY oi.id) AS items
+        COALESCE(
+          json_agg(json_build_object(
+            'quantity', oi.quantity,
+            'product_name', COALESCE(oi.product_name, p.name, 'Item'),
+            'total_price', oi.total_price
+          ) ORDER BY oi.id) FILTER (WHERE oi.id IS NOT NULL),
+          '[]'::json
+        ) AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
-      LEFT JOIN products p    ON p.id = oi.product_id
+      LEFT JOIN products p    ON oi.product_id::text = p.id::text
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
         AND o.status IN ('delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '7 days'
@@ -1652,7 +1658,7 @@ app.post('/api/driver/scan', async (req, res) => {
     }
 
     const itemsRes = await client.query(
-      'SELECT i.*, p.name as product_name FROM order_items i LEFT JOIN products p ON i.product_id = p.id WHERE i.order_id = $1',
+      'SELECT i.*, COALESCE(i.product_name, p.name, \'Item\') as product_name FROM order_items i LEFT JOIN products p ON i.product_id::text = p.id::text WHERE i.order_id = $1',
       [Number(orderId)]
     );
     const items = itemsRes.rows;

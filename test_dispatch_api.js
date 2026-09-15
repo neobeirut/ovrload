@@ -14,14 +14,14 @@ async function run() {
         o.created_at, o.customer_name, o.customer_phone,
         json_agg(json_build_object(
           'quantity', oi.quantity,
-          'product_name', p.name,
+          'product_name', COALESCE(oi.product_name, p.name, 'Item'),
           'total_price', oi.total_price
         ) ORDER BY oi.id) AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
-      LEFT JOIN products p    ON p.id = oi.product_id
-      WHERE o.order_type ILIKE 'delivery'
-        AND o.status IN ('pending', 'confirmed', 'ready')
+      LEFT JOIN products p    ON oi.product_id::text = p.id::text
+      WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
+        AND o.status NOT IN ('cancelled', 'delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
       GROUP BY o.id
       ORDER BY o.created_at DESC
