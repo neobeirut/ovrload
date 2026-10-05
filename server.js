@@ -152,7 +152,7 @@ app.get('/driver-sw.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.send(`
-const CACHE = 'driver-v4';
+const CACHE = 'driver-v5';
 const SHELL = ['/driver', '/driver-manifest.json', '/driver-icon.svg', 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'];
 
 self.addEventListener('install', e => {
@@ -938,6 +938,11 @@ app.get('/api/orders/pending-delivery', async (req, res) => {
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
         AND o.status NOT IN ('cancelled', 'delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '24 hours'
+        AND COALESCE(o.order_source, '') NOT ILIKE '%toter%'
+        AND COALESCE(o.order_source, '') NOT ILIKE '%noknok%'
+        AND COALESCE(o.order_source, '') NOT ILIKE '%nok_nok%'
+        AND COALESCE(o.customer_name, '') NOT ILIKE '%toters%'
+        AND COALESCE(o.customer_name, '') NOT ILIKE '%noknok%'
       GROUP BY o.id
       ORDER BY o.created_at DESC
     `);
@@ -973,6 +978,11 @@ app.get('/api/orders/picked-up', async (req, res) => {
       WHERE (o.order_type ILIKE 'delivery' OR (o.delivery_address IS NOT NULL AND o.delivery_address != ''))
         AND o.status IN ('delivered', 'completed')
         AND o.created_at >= NOW() - INTERVAL '7 days'
+        AND COALESCE(o.order_source, '') NOT ILIKE '%toter%'
+        AND COALESCE(o.order_source, '') NOT ILIKE '%noknok%'
+        AND COALESCE(o.order_source, '') NOT ILIKE '%nok_nok%'
+        AND COALESCE(o.customer_name, '') NOT ILIKE '%toters%'
+        AND COALESCE(o.customer_name, '') NOT ILIKE '%noknok%'
       GROUP BY o.id
       ORDER BY o.created_at DESC
       LIMIT 100
@@ -1609,6 +1619,12 @@ app.post('/api/driver/scan', async (req, res) => {
     const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 LIMIT 1', [Number(orderId)]);
     if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found.' });
     const order = orderRes.rows[0];
+
+    // Guard against Toters / Noknok orders
+    const src = ((order.order_source || '') + ' ' + (order.customer_name || '') + ' ' + (order.delivery_address || '')).toLowerCase();
+    if (src.includes('toter') || src.includes('noknok') || src.includes('nok nok')) {
+      return res.status(400).json({ error: 'This order is for Toters / Noknok and is handled by their own driver.' });
+    }
 
     // 2. Order Age Check: Suppress stale orders created > 4 hours ago or from a previous day
     if (isOrderTooOld(order.created_at, 4) || !isOrderFromToday(order.created_at)) {

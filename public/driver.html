@@ -235,8 +235,14 @@
         fetch('/api/orders/picked-up').then(function(res) { return res.ok ? res.json() : []; })
       ])
       .then(function(results) {
-        orders = results[0] || [];
-        historyOrders = results[1] || [];
+        function isExcludedOrder(o) {
+          if (!o) return true;
+          var s = ((o.order_source || '') + ' ' + (o.customer_name || '') + ' ' + (o.delivery_address || '')).toLowerCase();
+          return s.indexOf('toter') >= 0 || s.indexOf('noknok') >= 0 || s.indexOf('nok nok') >= 0;
+        }
+
+        orders = (results[0] || []).filter(function(o) { return !isExcludedOrder(o); });
+        historyOrders = (results[1] || []).filter(function(o) { return !isExcludedOrder(o); });
         
         document.getElementById('badge-active-count').textContent = orders.length;
         document.getElementById('badge-history-count').textContent = historyOrders.length;
@@ -267,7 +273,12 @@
 
     function renderOrders() {
       var wrap = document.getElementById('list-wrap');
-      var list = currentTab === 'active' ? orders : historyOrders;
+      var rawList = currentTab === 'active' ? orders : historyOrders;
+      var list = (rawList || []).filter(function(o) {
+        if (!o) return false;
+        var s = ((o.order_source || '') + ' ' + (o.customer_name || '') + ' ' + (o.delivery_address || '')).toLowerCase();
+        return s.indexOf('toter') < 0 && s.indexOf('noknok') < 0 && s.indexOf('nok nok') < 0;
+      });
 
       if (!list || !list.length) {
         if (currentTab === 'active') {
