@@ -27,11 +27,15 @@ const app = express();
 app.set('case sensitive routing', false);
 const PORT = process.env.PORT || 3000;
 
-const SUPABASE_DB_URL = "postgresql://postgres.nigtjaiwnmjdnmjtdlof:FsDdHJhoYDv1GsxW@aws-1-ap-south-1.pooler.supabase.com:6543/postgres";
+// Health check endpoints for Railway
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
+const SUPABASE_DB_URL = process.env.DATABASE_URL || "postgresql://postgres.nigtjaiwnmjdnmjtdlof:FsDdHJhoYDv1GsxW@aws-1-ap-south-1.pooler.supabase.com:6543/postgres";
 
 // Setup connection pool - always force Ovrload Supabase database URL
 const pool = new Pool({
-  connectionString: SUPABASE_DB_URL,
+  connectionString: process.env.DATABASE_URL || SUPABASE_DB_URL,
   ssl: {
     rejectUnauthorized: false
   },
