@@ -1108,12 +1108,12 @@ async function handleOrderStatusUpdate(req, res) {
       const target = normalizePhone(rawPhone);
 
       result = await client.query(
-        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone, customer_phone, created_at`,
+        `UPDATE orders SET status = $1, driver_phone = $2 WHERE id = $3 RETURNING id, status, driver_phone, customer_phone, created_at, total_amount`,
         [status, target, Number(req.params.id)]
       );
     } else {
       result = await client.query(
-        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone, customer_phone, created_at`,
+        `UPDATE orders SET status = $1 WHERE id = $2 RETURNING id, status, driver_phone, customer_phone, created_at, total_amount`,
         [status, Number(req.params.id)]
       );
     }
@@ -1126,7 +1126,7 @@ async function handleOrderStatusUpdate(req, res) {
     const isPreparingOrAccepted = status === 'confirmed' || status === 'preparing' || status === 'accepted';
     const wasPreparingOrAccepted = prevStatus === 'confirmed' || prevStatus === 'preparing' || prevStatus === 'accepted';
     if (isPreparingOrAccepted && !wasPreparingOrAccepted && targetCustomerPhone) {
-      await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone);
+      await sendCustomerPreparingNotification(updatedOrder.id, targetCustomerPhone, updatedOrder.total_amount);
     }
 
     // Send "Your order {{1}} is out for delivery." when marked as completed/delivered/out_for_delivery (e.g. driver pickup, POS, Admin)
@@ -1368,19 +1368,22 @@ async function sendInfobipOrderNotifications({
   }
 }
 
-// Helper function to send "We are preparing your items now!" WhatsApp notification to customer via Infobip template
-async function sendCustomerPreparingNotification(orderId, customerPhone) {
+// Helper function to send "We are preparing your items now! your order total amount  is {{1}} including delivery" WhatsApp notification to customer via Infobip template
+async function sendCustomerPreparingNotification(orderId, customerPhone, totalAmount) {
   if (!customerPhone) return null;
   const target = normalizePhone(customerPhone);
   if (!target) return null;
 
-  console.log(`[preparing_notification] Sending order_preparing WhatsApp to customer ${target} for order #${orderId}`);
+  const numTotal = Number(totalAmount || 0);
+  const formattedTotal = `$${numTotal % 1 === 0 ? numTotal.toFixed(0) : numTotal.toFixed(2)}`;
+
+  console.log(`[preparing_notification] Sending order_preparing WhatsApp to customer ${target} for order #${orderId} (Total: ${formattedTotal})`);
 
   // Direct Meta Template dispatch (order_preparing) - sends exactly one message
   return await sendWhatsAppTemplate({
     to: target,
     templateName: "order_preparing",
-    placeholders: []
+    placeholders: [formattedTotal]
   });
 }
 
