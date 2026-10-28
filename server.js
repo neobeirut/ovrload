@@ -491,6 +491,15 @@ app.post('/api/pos/orders', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    if (customerPhone && (status === 'preparing' || status === 'confirmed' || status === 'accepted')) {
+      try {
+        await sendCustomerPreparingNotification(orderId, customerPhone, total);
+      } catch (notifErr) {
+        console.error('Error sending order_preparing notification from POS order creation:', notifErr.message);
+      }
+    }
+
     res.json({
       success: true,
       orderId,
