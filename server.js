@@ -955,6 +955,83 @@ app.put('/api/branch-status', async (req, res) => {
   }
 });
 
+// OPTIONS /api/pos/dispatch-driver — CORS preflight for POS driver dispatch
+app.options('/api/pos/dispatch-driver', (req, res) => {
+  setBranchStatusCors(res);
+  res.status(204).end();
+});
+
+// POST /api/pos/dispatch-driver — Send WhatsApp driver request via Infobip approved 'driver_request' template
+app.post('/api/pos/dispatch-driver', async (req, res) => {
+  setBranchStatusCors(res);
+  try {
+    const { orderId, etaMinutes, phone, driverPhone, messageText: clientMessageText } = req.body || {};
+    const rawTarget = driverPhone || phone || '9613826136';
+    const targetPhone = normalizePhone(rawTarget) || '9613826136';
+
+    const isNow = etaMinutes === 'Now' || etaMinutes === 0 || etaMinutes === '0';
+    const cleanMins = String(etaMinutes || '').replace(/[^0-9]/g, '');
+    const mins = cleanMins ? parseInt(cleanMins, 10) : 15;
+    const etaText = isNow ? 'Now' : `in ${mins}'`;
+
+    const orderNum = orderId ? (String(orderId).trim().startsWith('#') ? String(orderId).trim() : `#${String(orderId).trim()}`) : '';
+    const templateParam = orderNum ? `${orderNum} ${etaText}`.trim() : etaText;
+    const messageText = clientMessageText || `Hello, driver needed for Order ${templateParam}\nThank you`;
+
+    let usedTemplate = false;
+    let apiResult = null;
+
+    // 1. Send via approved Infobip WhatsApp template 'driver_request'
+    try {
+      const tplRes = await sendWhatsAppTemplate({
+        to: targetPhone,
+        templateName: 'driver_request',
+        placeholders: [templateParam],
+        language: 'en'
+      });
+      if (tplRes && tplRes.success) {
+        usedTemplate = true;
+        apiResult = tplRes.data;
+      }
+    } catch (tplErr) {
+      console.warn('[pos/dispatch-driver] Template send failed, falling back to free-form:', tplErr.message);
+    }
+
+    // 2. Fallback to free-form WhatsApp text if template failed
+    if (!usedTemplate) {
+      const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
+      const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
+      const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
+      const ffRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `App ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          from: sender,
+          to: targetPhone,
+          content: { text: messageText }
+        })
+      });
+      apiResult = await ffRes.json().catch(() => ({}));
+    }
+
+    return res.json({
+      success: true,
+      usedTemplate,
+      targetPhone,
+      templateParamSent: templateParam,
+      messageText,
+      result: apiResult
+    });
+  } catch (error) {
+    console.error('[pos/dispatch-driver] Error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to dispatch driver: ' + error.message });
+  }
+});
+
 // GET /api/order-settings
 app.get('/api/order-settings', async (req, res) => {
   try {
