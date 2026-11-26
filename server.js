@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const { Pool } = require('pg');
@@ -46,6 +47,26 @@ const pool = new Pool({
 
 pool.on('error', (err) => {
   console.error('Unexpected idle pool client error:', err.message);
+});
+
+// Unified FLOW Production DB Pool (for routing online WhatsApp orders directly into FLOW POS)
+const FLOW_DATABASE_URL = process.env.FLOW_DATABASE_URL || "postgresql://postgres.ilrlychrraagugntqdfr:7fs0%26cUGaX4j04kc3AzR@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres";
+const FLOW_RESTAURANT_ID = process.env.FLOW_RESTAURANT_ID || "79256f11-a9f8-4fec-901d-69baf929762d";
+const FLOW_BRANCH_ID = process.env.FLOW_BRANCH_ID || "9c214659-9cc7-4f33-b115-cbbb8a823a94";
+const FLOW_OVRLOAD_CONCEPT_ID = process.env.FLOW_OVRLOAD_CONCEPT_ID || "00000000-0000-0000-0000-000000000002";
+
+const flowPool = new Pool({
+  connectionString: FLOW_DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  },
+  max: 5,
+  idleTimeoutMillis: 20000,
+  connectionTimeoutMillis: 10000
+});
+
+flowPool.on('error', (err) => {
+  console.error('Unexpected idle flowPool client error:', err.message);
 });
 
 // Universal Phone Number Normalizer (handles Arabic numerals, 0-prefixes, +961 0..., international)
@@ -1427,7 +1448,7 @@ async function sendCustomerCancelledNotification(orderId, customerPhone) {
   });
 }
 
-// POST /api/orders/save — Save a WhatsApp order to the database
+// POST /api/orders/save — Save a WhatsApp order directly into the unified FLOW DB (pos_orders)
 app.post('/api/orders/save', async (req, res) => {
   const {
     customerName,
@@ -1449,59 +1470,111 @@ app.post('/api/orders/save', async (req, res) => {
   }
 
   const cleanCustomerPhone = normalizePhone(customerPhone) || customerPhone;
+  const resolvedOrderType = orderType === 'pickup' ? 'pickup' : 'delivery';
+  const itemsCount = items.reduce((sum, it) => sum + Number(it.qty || 1), 0);
 
-  const client = await pool.connect();
+  let finalDeliveryAddress = (deliveryAddress || '').trim();
+  if (resolvedOrderType === 'delivery' && lat && lng && !/\[Maps Pin:/i.test(finalDeliveryAddress)) {
+    const pinTag = `[Maps Pin: https://www.google.com/maps?q=${lat},${lng}]`;
+    finalDeliveryAddress = finalDeliveryAddress ? `${finalDeliveryAddress} ${pinTag}` : pinTag;
+  }
+
+  const client = await flowPool.connect();
   try {
     await client.query('BEGIN');
 
     // Compose special_instructions with delivery time info
     const specialInstructions = `Delivery Time: ${deliveryTime || 'ASAP'}`;
 
-    // Insert order with dedicated customer name & phone columns
+    // Map incoming storefront item names to canonical FLOW OVRLOAD product IDs
+    const prodRes = await client.query(
+      `SELECT id, name FROM public.products WHERE concept_id = $1`,
+      [FLOW_OVRLOAD_CONCEPT_ID]
+    );
+    const exactProdMap = new Map();
+    const normProdMap = new Map();
+    const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    for (const p of prodRes.rows) {
+      const lower = String(p.name || '').trim().toLowerCase();
+      if (lower && !exactProdMap.has(lower)) exactProdMap.set(lower, String(p.id));
+      const nk = normKey(p.name);
+      if (nk && !normProdMap.has(nk)) normProdMap.set(nk, String(p.id));
+    }
+
+    // Insert order into FLOW public.pos_orders as a new WhatsApp order
     const orderResult = await client.query(
-      `INSERT INTO orders
-        (branch_id, order_type, order_source, delivery_address, subtotal_amount, delivery_fee, discount_amount,
-         total_amount, status, special_instructions, delivery_distance_km, delivery_cost_at_order,
-         customer_name, customer_phone, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      `INSERT INTO public.pos_orders
+        (restaurant_id, branch_id, concept_id, order_type, order_source, sales_channel,
+         payment_method, customer_name, customer_phone, delivery_address, special_instructions,
+         status, subtotal_amount, delivery_fee, discount_amount, discount_label, total_amount,
+         tendered_amount, tendered_currency, change_amount, change_currency, exchange_rate,
+         waiter_name, cashier_name, terminal_id, items_count, version,
+         inventory_status, data_provenance, source_system, created_at, updated_at, completed_at)
+       VALUES
+        ($1, $2, $3, $4, $5, $6,
+         $7, $8, $9, $10, $11,
+         $12, $13, $14, $15, $16, $17,
+         0, 'USD', 0, 'USD', 90000,
+         'Online Store', 'Online Store', 'OVRLOAD-WEB', $18, 1,
+         'PENDING', 'GENUINE_OPERATIONAL', 'OVRLOAD_WEB', NOW(), NOW(), NULL)
        RETURNING id`,
       [
-        1,                           // branch_id (Ovrload single branch)
-        orderType || 'delivery',     // order_type
-        'WhatsApp',                  // order_source
-        deliveryAddress || '',       // delivery_address
-        subtotal || 0,               // subtotal_amount
-        deliveryFee || 0,            // delivery_fee
-        discountAmount || 0,         // discount_amount
-        total || 0,                  // total_amount
-        'pending',                   // status
-        specialInstructions,         // special_instructions
-        lat && lng ? String((await getRoadDistanceKm(33.876514, 35.517225, lat, lng)).toFixed(2)) : null,
-        deliveryFee || 0,            // delivery_cost_at_order
-        customerName || null,        // customer_name
-        cleanCustomerPhone || null   // customer_phone
+        FLOW_RESTAURANT_ID,                                          // $1 restaurant_id
+        FLOW_BRANCH_ID,                                              // $2 branch_id
+        FLOW_OVRLOAD_CONCEPT_ID,                                     // $3 concept_id
+        resolvedOrderType,                                           // $4 order_type
+        'WhatsApp',                                                  // $5 order_source
+        'WHATSAPP',                                                  // $6 sales_channel
+        'Cash USD',                                                  // $7 payment_method
+        customerName || 'WhatsApp Customer',                         // $8 customer_name
+        cleanCustomerPhone || null,                                  // $9 customer_phone
+        finalDeliveryAddress || null,                                // $10 delivery_address
+        specialInstructions,                                         // $11 special_instructions
+        'new',                                                       // $12 status (arrives in POS NEW tab)
+        Number(subtotal || 0),                                       // $13 subtotal_amount
+        Number(deliveryFee || 0),                                    // $14 delivery_fee
+        Number(discountAmount || 0),                                 // $15 discount_amount
+        Number(discountAmount || 0) > 0 ? 'WhatsApp Discount' : null,// $16 discount_label
+        Number(total || 0),                                          // $17 total_amount
+        itemsCount                                                   // $18 items_count
       ]
     );
 
     const orderId = orderResult.rows[0].id;
 
-    // Insert order items
+    // Insert order items into FLOW public.pos_order_items
     for (const item of items) {
-      const itemTotal = (item.unit_price_usd || 0) * (item.qty || 1);
-      const customizationsText = item.customizations && item.customizations.length > 0
-        ? item.customizations.map(c => c.type === 'remove' ? `No ${c.name}` : c.name).join(', ')
+      const qty = Number(item.qty || 1);
+      const unitPrice = Number(item.unit_price_usd || 0);
+      const itemTotal = unitPrice * qty;
+      const itemName = item.name || 'Item';
+      const resolvedProductId =
+        exactProdMap.get(String(itemName).trim().toLowerCase()) ||
+        normProdMap.get(normKey(itemName)) ||
+        String(item.id || '');
+
+      const rawCusts = Array.isArray(item.customizations) ? item.customizations : [];
+      const customizationsText = rawCusts.length > 0
+        ? rawCusts.map(c => typeof c === 'string' ? c : (c.type === 'remove' ? `No ${c.name}` : (c.name || c.ingredient || ''))).filter(Boolean).join(', ')
         : null;
+      const lineItemId = crypto.randomUUID ? crypto.randomUUID() : `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       await client.query(
-        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price, customizations)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO public.pos_order_items
+          (order_id, concept_id, line_item_id, product_id, product_name, quantity,
+           unit_price, total_price, customizations, customizations_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, NOW())`,
         [
           orderId,
-          item.id,
-          item.qty || 1,
-          item.unit_price_usd || 0,
+          FLOW_OVRLOAD_CONCEPT_ID,
+          lineItemId,
+          resolvedProductId,
+          itemName,
+          qty,
+          unitPrice,
           itemTotal,
-          customizationsText
+          customizationsText,
+          JSON.stringify(rawCusts)
         ]
       );
     }
@@ -1514,14 +1587,14 @@ app.post('/api/orders/save', async (req, res) => {
         orderId,
         customerName,
         customerPhone: cleanCustomerPhone,
-        deliveryAddress,
+        deliveryAddress: finalDeliveryAddress,
         deliveryTime,
         items,
         subtotal,
         discountAmount,
         deliveryFee,
         total,
-        orderType,
+        orderType: resolvedOrderType,
         lat,
         lng
       });
@@ -1531,8 +1604,8 @@ app.post('/api/orders/save', async (req, res) => {
 
     res.json({ success: true, orderId });
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error saving order:', error);
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error saving order to FLOW DB:', error);
     res.status(500).json({ error: 'Failed to save order.' });
   } finally {
     client.release();
