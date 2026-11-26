@@ -955,6 +955,48 @@ app.put('/api/branch-status', async (req, res) => {
   }
 });
 
+// Cache concept WhatsApp sender numbers from FLOW DB (concept_messaging_configurations)
+const conceptSenderCache = new Map();
+const CONCEPT_SENDER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function resolveConceptWhatsAppSender(conceptId) {
+  const defaultOvrloadSender = (process.env.INFOBIP_WHATSAPP_SENDER || '96181202607').replace('+', '').trim();
+  if (!conceptId) return defaultOvrloadSender;
+
+  const key = String(conceptId).trim().toLowerCase();
+  const cached = conceptSenderCache.get(key);
+  if (cached && (Date.now() - cached.ts) < CONCEPT_SENDER_CACHE_TTL_MS) {
+    return cached.sender;
+  }
+
+  let resolvedSender = null;
+  try {
+    const res = await flowPool.query(
+      `SELECT whatsapp_sender_number FROM public.concept_messaging_configurations WHERE concept_id = $1 LIMIT 1`,
+      [conceptId]
+    );
+    if (res.rows.length > 0 && res.rows[0].whatsapp_sender_number) {
+      const digits = String(res.rows[0].whatsapp_sender_number).replace(/\D/g, '');
+      if (digits.length >= 8) {
+        resolvedSender = digits;
+      }
+    }
+  } catch (err) {
+    console.warn('[resolveConceptWhatsAppSender] DB lookup warning:', err.message);
+  }
+
+  if (!resolvedSender) {
+    if (key === '00000000-0000-0000-0000-000000000002' || key === 'ovrload') {
+      resolvedSender = defaultOvrloadSender;
+    } else if (key === '00000000-0000-0000-0000-000000000001' || key === 'neo') {
+      resolvedSender = '96176489078';
+    }
+  }
+
+  conceptSenderCache.set(key, { sender: resolvedSender, ts: Date.now() });
+  return resolvedSender;
+}
+
 // OPTIONS /api/pos/dispatch-driver — CORS preflight for POS driver dispatch
 app.options('/api/pos/dispatch-driver', (req, res) => {
   setBranchStatusCors(res);
@@ -965,9 +1007,10 @@ app.options('/api/pos/dispatch-driver', (req, res) => {
 app.post('/api/pos/dispatch-driver', async (req, res) => {
   setBranchStatusCors(res);
   try {
-    const { orderId, etaMinutes, phone, driverPhone, messageText: clientMessageText } = req.body || {};
+    const { orderId, conceptId, etaMinutes, phone, driverPhone, messageText: clientMessageText } = req.body || {};
     const rawTarget = driverPhone || phone || '9613826136';
     const targetPhone = normalizePhone(rawTarget) || '9613826136';
+    const senderNumber = (await resolveConceptWhatsAppSender(conceptId)) || (process.env.INFOBIP_WHATSAPP_SENDER || '96181202607').replace('+', '').trim();
 
     const isNow = etaMinutes === 'Now' || etaMinutes === 0 || etaMinutes === '0';
     const cleanMins = String(etaMinutes || '').replace(/[^0-9]/g, '');
@@ -987,21 +1030,21 @@ app.post('/api/pos/dispatch-driver', async (req, res) => {
         to: targetPhone,
         templateName: 'driver_request',
         placeholders: [templateParam],
-        language: 'en'
+        language: 'en',
+        sender: senderNumber
       });
-      if (tplRes && tplRes.success) {
+      if (tplRes && (tplRes.ok || tplRes.success)) {
         usedTemplate = true;
-        apiResult = tplRes.data;
+        apiResult = tplRes;
       }
     } catch (tplErr) {
       console.warn('[pos/dispatch-driver] Template send failed, falling back to free-form:', tplErr.message);
     }
 
-    // 2. Fallback to free-form WhatsApp text if template failed
+    // 2. Fallback to free-form WhatsApp text ONLY if template failed
     if (!usedTemplate) {
       const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
       const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
-      const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
       const ffRes = await fetch(`${baseUrl}/whatsapp/1/message/text`, {
         method: 'POST',
         headers: {
@@ -1010,7 +1053,7 @@ app.post('/api/pos/dispatch-driver', async (req, res) => {
           'Accept': 'application/json'
         },
         body: JSON.stringify({
-          from: sender,
+          from: senderNumber,
           to: targetPhone,
           content: { text: messageText }
         })
@@ -1021,6 +1064,7 @@ app.post('/api/pos/dispatch-driver', async (req, res) => {
     return res.json({
       success: true,
       usedTemplate,
+      senderNumber,
       targetPhone,
       templateParamSent: templateParam,
       messageText,
@@ -1029,6 +1073,90 @@ app.post('/api/pos/dispatch-driver', async (req, res) => {
   } catch (error) {
     console.error('[pos/dispatch-driver] Error:', error);
     return res.status(500).json({ success: false, error: 'Failed to dispatch driver: ' + error.message });
+  }
+});
+
+// OPTIONS /api/pos/notify-customer — CORS preflight for multi-concept customer WhatsApp status notifications
+app.options('/api/pos/notify-customer', (req, res) => {
+  setBranchStatusCors(res);
+  res.status(204).end();
+});
+
+// POST /api/pos/notify-customer — Concept-aware Infobip WhatsApp customer lifecycle notifications
+app.post('/api/pos/notify-customer', async (req, res) => {
+  setBranchStatusCors(res);
+  try {
+    const {
+      orderId,
+      conceptId,
+      event,
+      customerPhone,
+      orderType,
+      orderSource,
+      totalAmount,
+      orderDetails
+    } = req.body || {};
+
+    const srcLower = String(orderSource || '').toLowerCase();
+    if (srcLower.includes('toter') || srcLower.includes('nok')) {
+      return res.json({ success: true, skipped: true, reason: 'Aggregator order' });
+    }
+
+    const targetPhone = normalizePhone(customerPhone);
+    if (!targetPhone) {
+      return res.json({ success: true, skipped: true, reason: 'No customer phone' });
+    }
+
+    const senderNumber = await resolveConceptWhatsAppSender(conceptId);
+    if (!senderNumber) {
+      return res.json({ success: true, skipped: true, reason: 'Concept WhatsApp sender not configured' });
+    }
+
+    const ev = String(event || '').toLowerCase();
+    const oType = String(orderType || '').toLowerCase();
+    const orderNumTag = `#${String(orderId || '').replace(/^#/, '')}`;
+
+    let templateName = null;
+    let placeholders = [];
+
+    if (ev === 'order_confirmation' || ev === 'created' || ev === 'new') {
+      templateName = 'order_confirmation';
+      placeholders = [String(orderId || ''), String(orderDetails || 'Order received').slice(0, 950)];
+    } else if (ev === 'preparing') {
+      templateName = 'order_preparing';
+      placeholders = [`$${Number(totalAmount || 0).toFixed(2)}`];
+    } else if (ev === 'ready') {
+      templateName = 'order_ready';
+      placeholders = [orderNumTag];
+    } else if (ev === 'completed' || ev === 'delivered' || ev === 'out_for_delivery') {
+      if (oType !== 'delivery') {
+        return res.json({ success: true, skipped: true, reason: 'Not a delivery order' });
+      }
+      templateName = 'out_for_delivery';
+      placeholders = [orderNumTag];
+    } else {
+      return res.json({ success: true, skipped: true, reason: `No customer template for event '${ev}'` });
+    }
+
+    const tplRes = await sendWhatsAppTemplate({
+      to: targetPhone,
+      templateName,
+      placeholders,
+      language: 'en',
+      sender: senderNumber
+    });
+
+    return res.json({
+      success: Boolean(tplRes && (tplRes.ok || tplRes.success)),
+      templateName,
+      senderNumber,
+      targetPhone,
+      placeholders,
+      result: tplRes
+    });
+  } catch (error) {
+    console.error('[pos/notify-customer] Error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to notify customer: ' + error.message });
   }
 });
 
@@ -1410,14 +1538,14 @@ app.put(statusUpdatePaths, handleOrderStatusUpdate);
 
 
 // Generic Helper to send approved Meta WhatsApp Templates via Infobip
-async function sendWhatsAppTemplate({ to, templateName, placeholders, language = "en" }) {
+async function sendWhatsAppTemplate({ to, templateName, placeholders, language = "en", sender: overrideSender = null }) {
   if (!to) return null;
   const target = normalizePhone(to);
   if (!target) return null;
 
   const apiKey = process.env.INFOBIP_API_KEY || "d42824b2b707759420c14250c320ec7b-449822b8-55e1-4d67-906f-8a19af1d302e";
   const baseUrl = (process.env.INFOBIP_BASE_URL || "https://y4r1q1.api.infobip.com").replace(/\/$/, "");
-  const sender = (process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
+  const sender = String(overrideSender || process.env.INFOBIP_WHATSAPP_SENDER || "96181202607").replace("+", "").trim();
 
   const cleanPlaceholders = (placeholders || []).map(p =>
     String(p || "").replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim()
@@ -1455,7 +1583,7 @@ async function sendWhatsAppTemplate({ to, templateName, placeholders, language =
 
     if (!tplRes.ok && language === "en") {
       // Fallback with en_US
-      return await sendWhatsAppTemplate({ to, templateName, placeholders, language: "en_US" });
+      return await sendWhatsAppTemplate({ to, templateName, placeholders, language: "en_US", sender });
     }
     return tplData;
   } catch (err) {
@@ -1555,7 +1683,8 @@ async function sendInfobipOrderNotifications({
       const templateResult = await sendWhatsAppTemplate({
         to: clientTarget,
         templateName: "order_confirmation",
-        placeholders: [String(orderId), "OVRLOAD"]
+        placeholders: [String(orderId), baseOrderInfo.slice(0, 950)],
+        sender
       });
       console.log(`[infobip_dispatch] Sent order_confirmation template to customer ${clientTarget} for order #${orderId}:`, JSON.stringify(templateResult));
     } catch (tplErr) {
