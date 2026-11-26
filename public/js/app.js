@@ -106,12 +106,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchBranchStatus() {
     try {
-      const res = await fetch('api/branch-status');
+      const res = await fetch('api/branch-status', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       
       let status = data.operational_status || 'open';
-      if ((data.orders_active === false || data.is_active === false) && status === 'open') {
+      if (!data.manual_override && (data.orders_active === false || data.is_active === false) && status === 'open') {
         status = 'closed';
       }
       const rawReason = (data.closure_reason || '').trim();
@@ -119,6 +119,30 @@ document.addEventListener('DOMContentLoaded', () => {
       
       isBranchOpen = true;
       branchClosureMessage = '';
+
+      // PRIORITY 0: Same-day POS manual override takes precedence over scheduled hours/weekdays
+      // Automatically reverts to saved schedule when the day finishes (handled server-side).
+      if (data.manual_override === 'open') {
+        isBranchOpen = true;
+        branchClosureMessage = '';
+        renderBranchNoticeBanner();
+        return;
+      } else if (data.manual_override === 'closed') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is Closed${reasonText}`;
+        renderBranchNoticeBanner();
+        return;
+      } else if (data.manual_override === 'closed_hour') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is Closed For an Hour${reasonText}`;
+        renderBranchNoticeBanner();
+        return;
+      } else if (data.manual_override === 'closed_today') {
+        isBranchOpen = false;
+        branchClosureMessage = `Store is Closed For Today${reasonText}`;
+        renderBranchNoticeBanner();
+        return;
+      }
 
       // Get current Beirut time details (HH:mm 24h format and weekday name)
       const nowBeirutWeekday = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Beirut', weekday: 'long' }).toLowerCase();
@@ -1092,6 +1116,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle Form Submit / Checkout
   checkoutForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    // Always re-check live branch status before blocking/submitting
+    await fetchBranchStatus();
 
     if (!isBranchOpen) {
       alert(`⚠️ ${branchClosureMessage}\n\nWe cannot process new orders at this time. Thank you for your understanding!`);

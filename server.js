@@ -783,8 +783,35 @@ app.get('/api/branches', async (req, res) => {
   }
 });
 
+function getBeirutDateStr(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Beirut',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+function setBranchStatusCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+}
+
+app.options('/api/branch-status', (req, res) => {
+  setBranchStatusCors(res);
+  res.status(204).end();
+});
+
 // GET /api/branch-status — fetch active operational status & schedule for customer app
+// Respects same-day POS manual override (open or closed), automatically reverting to saved schedule after the day ends.
 app.get('/api/branch-status', async (req, res) => {
+  setBranchStatusCors(res);
   try {
     const result = await pool.query(
       `SELECT id, name, phone, is_active, orders_active, opening_time, closing_time,
@@ -794,16 +821,137 @@ app.get('/api/branch-status', async (req, res) => {
        WHERE id = 1 LIMIT 1`
     );
     if (result.rows.length === 0) {
-      return res.json({ isOpen: true, operational_status: 'open' });
+      return res.json({ isOpen: true, operational_status: 'open', manual_override: null });
     }
     const branch = result.rows[0];
-    if ((branch.orders_active === false || branch.is_active === false) && branch.operational_status === 'open') {
-      branch.operational_status = 'closed';
+    const todayBeirut = getBeirutDateStr();
+
+    // Check same-day POS manual override in app_settings
+    let override = null;
+    try {
+      const ovRes = await pool.query(
+        "SELECT setting_value FROM app_settings WHERE setting_key = 'pos_store_status_override' LIMIT 1"
+      );
+      if (ovRes.rows.length > 0 && ovRes.rows[0].setting_value) {
+        override = JSON.parse(ovRes.rows[0].setting_value);
+      }
+    } catch (ovErr) {
+      console.warn('[branch-status] Could not parse pos_store_status_override:', ovErr.message);
     }
+
+    if (override && override.date) {
+      const isExpiredDay = override.date !== todayBeirut;
+      const isExpiredHour = override.status === 'closed_hour' && override.expiresAt && Date.now() >= new Date(override.expiresAt).getTime();
+
+      if (isExpiredDay || isExpiredHour) {
+        // Day finished (or 1-hour pause elapsed) -> revert automatically to initial saved schedule settings
+        try {
+          await pool.query("DELETE FROM app_settings WHERE setting_key = 'pos_store_status_override'");
+          await pool.query(
+            `UPDATE branches
+             SET operational_status = 'open',
+                 closure_reason = NULL,
+                 orders_active = true,
+                 is_active = true
+             WHERE id = 1`
+          );
+          branch.operational_status = 'open';
+          branch.closure_reason = null;
+          branch.orders_active = true;
+          branch.is_active = true;
+        } catch (resetErr) {
+          console.warn('[branch-status] Auto-reset warning:', resetErr.message);
+        }
+        override = null;
+      }
+    }
+
+    if (override && override.status) {
+      branch.manual_override = override.status;
+      branch.override_date = override.date;
+      branch.operational_status = override.status;
+      branch.closure_reason = override.status === 'open' ? null : (override.reason || branch.closure_reason || null);
+      branch.orders_active = override.status === 'open';
+      branch.is_active = override.status !== 'closed';
+    } else {
+      branch.manual_override = null;
+      branch.override_date = null;
+      if ((branch.orders_active === false || branch.is_active === false) && branch.operational_status === 'open') {
+        branch.operational_status = 'closed';
+      }
+    }
+
     res.json(branch);
   } catch (error) {
     console.error('Error fetching branch status:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT /api/branch-status — Set same-day POS manual override (open / closed / closed_hour / closed_today)
+app.put('/api/branch-status', async (req, res) => {
+  setBranchStatusCors(res);
+  try {
+    const body = req.body || {};
+    const allowed = ['open', 'closed', 'closed_hour', 'closed_today'];
+    const status = allowed.includes(body.operational_status) ? body.operational_status : 'open';
+    const finalReason = status !== 'open' ? (body.closure_reason || 'Overloaded') : null;
+    const todayBeirut = getBeirutDateStr();
+    const expiresAt = status === 'closed_hour' ? new Date(Date.now() + 60 * 60 * 1000).toISOString() : null;
+
+    const overridePayload = JSON.stringify({
+      status,
+      reason: finalReason,
+      date: todayBeirut,
+      expiresAt,
+      updatedAt: new Date().toISOString()
+    });
+
+    // Save same-day override in app_settings
+    const updSetting = await pool.query(
+      "UPDATE app_settings SET setting_value = $1 WHERE setting_key = 'pos_store_status_override'",
+      [overridePayload]
+    );
+    if (updSetting.rowCount === 0) {
+      await pool.query(
+        "INSERT INTO app_settings (setting_key, setting_value) VALUES ('pos_store_status_override', $1)",
+        [overridePayload]
+      );
+    }
+
+    // Also update branches row so legacy consumers stay in sync
+    const updBranch = await pool.query(
+      `UPDATE branches
+       SET operational_status = $1,
+           closure_reason = $2,
+           orders_active = $3,
+           is_active = $4
+       WHERE id = 1
+       RETURNING id, name, phone, is_active, orders_active, opening_time, closing_time,
+                 operational_status, closure_reason, weekday_schedule`,
+      [status, finalReason, status === 'open', status !== 'closed']
+    );
+
+    const branch = updBranch.rows[0] || {
+      id: 1,
+      name: body.name || 'Cloud Kitchen',
+      operational_status: status,
+      closure_reason: finalReason,
+      orders_active: status === 'open',
+      is_active: status !== 'closed'
+    };
+
+    res.json({
+      success: true,
+      branch: {
+        ...branch,
+        manual_override: status,
+        override_date: todayBeirut
+      }
+    });
+  } catch (error) {
+    console.error('Error updating branch status:', error);
+    res.status(500).json({ error: 'Failed to update branch status: ' + error.message });
   }
 });
 
